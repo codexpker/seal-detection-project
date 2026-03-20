@@ -6,13 +6,14 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
-
 import httpx
 import mysql.connector
 from fastapi import FastAPI, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
+
+from src.anomaly_v2 import pipeline as v2_pipeline
 
 
 # -----------------------------
@@ -43,6 +44,16 @@ MODEL_CONNECT_TIMEOUT_SECONDS = float(_env("MODEL_CONNECT_TIMEOUT_SECONDS", "0.3
 MODEL_CALL_RETRIES = int(_env("MODEL_CALL_RETRIES", "2"))
 MODEL_SERVICE_ENABLED = _env("MODEL_SERVICE_ENABLED", "false").lower() in ("1", "true", "yes", "on")
 DEVICE_PROCESS_MIN_INTERVAL_MS = int(_env("DEVICE_PROCESS_MIN_INTERVAL_MS", "3000"))
+ANOMALY_V2_ENABLED = _env("ANOMALY_V2_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+ANOMALY_V2_SHADOW_MODE = _env("ANOMALY_V2_SHADOW_MODE", "true").lower() in ("1", "true", "yes", "on")
+ANOMALY_V2_ALPHA = float(_env("ANOMALY_V2_ALPHA", "0.20"))
+ANOMALY_V2_WARN_THRESHOLD = float(_env("ANOMALY_V2_WARN_THRESHOLD", "0.72"))
+ANOMALY_V2_RECOVER_THRESHOLD = float(_env("ANOMALY_V2_RECOVER_THRESHOLD", "0.50"))
+ANOMALY_V2_MIN_POINTS = int(_env("ANOMALY_V2_MIN_POINTS", "5"))
+ANOMALY_V2_EVENT_START_COUNT = int(_env("ANOMALY_V2_EVENT_START_COUNT", "4"))
+ANOMALY_V2_EVENT_END_COUNT = int(_env("ANOMALY_V2_EVENT_END_COUNT", "6"))
+ANOMALY_V2_EVENT_MIN_DURATION_SEC = int(_env("ANOMALY_V2_EVENT_MIN_DURATION_SEC", "240"))
+ANOMALY_V2_EVENT_COOLDOWN_SEC = int(_env("ANOMALY_V2_EVENT_COOLDOWN_SEC", "900"))
 
 
 # -----------------------------
@@ -87,6 +98,30 @@ class ReplayRequest(BaseModel):
 class ModelRollbackRequest(BaseModel):
     model_name: Literal["xgboost", "gru", "auto"]
     target_version: str
+
+
+class AnomalyV2ControlRequest(BaseModel):
+    enabled: Optional[bool] = None
+    shadow_mode: Optional[bool] = None
+    alpha: Optional[float] = None
+    warn_threshold: Optional[float] = None
+    recover_threshold: Optional[float] = None
+    min_points: Optional[int] = None
+    event_start_count: Optional[int] = None
+    event_end_count: Optional[int] = None
+    event_min_duration_sec: Optional[int] = None
+    event_cooldown_sec: Optional[int] = None
+    sim_enabled: Optional[bool] = None
+    sim_weight: Optional[float] = None
+    sim_k: Optional[int] = None
+    debug_trace: Optional[bool] = None
+
+
+class AnomalyV2ReviewLabelRequest(BaseModel):
+    event_id: str
+    label: Literal["true", "false", "uncertain"]
+    reviewer: str = ""
+    note: str = ""
 
 
 # -----------------------------
@@ -142,12 +177,17 @@ RUNTIME_METRICS: Dict[str, int] = {
     "process_insufficient": 0,
     "process_model_timeout": 0,
     "process_model_error": 0,
+    "process_model_skipped": 0,
     "process_skipped_interval": 0,
     "model_call_total": 0,
     "model_call_retry": 0,
     "queue_enqueued": 0,
     "queue_merged": 0,
     "queue_processed": 0,
+    "anomaly_v2_runs": 0,
+    "anomaly_v2_events": 0,
+    "anomaly_v2_shadow_events": 0,
+    "anomaly_v2_errors": 0,
 }
 REPLAY_TASKS: Dict[str, Dict[str, Any]] = {}
 # 记录“服务端处理时间(ms)”，不要使用设备上报时间做节流（设备时间可能是秒级）
@@ -164,6 +204,25 @@ ACTIVE_MODEL_VERSION: Dict[str, str] = {
     "xgboost": "xgboost-2026.02",
     "gru": "gru-2026.02",
     "auto": "auto",
+}
+ANOMALY_V2_STATE_BY_DEV: Dict[str, Dict[str, Any]] = {}
+ANOMALY_V2_REF_WINDOWS_BY_DEV: Dict[str, List[Dict[str, float]]] = {}
+ANOMALY_V2_LAST_DEBUG_BY_DEV: Dict[str, Dict[str, Any]] = {}
+ANOMALY_V2_RUNTIME: Dict[str, Any] = {
+    "enabled": ANOMALY_V2_ENABLED,
+    "shadow_mode": ANOMALY_V2_SHADOW_MODE,
+    "alpha": ANOMALY_V2_ALPHA,
+    "warn_threshold": ANOMALY_V2_WARN_THRESHOLD,
+    "recover_threshold": ANOMALY_V2_RECOVER_THRESHOLD,
+    "min_points": ANOMALY_V2_MIN_POINTS,
+    "event_start_count": ANOMALY_V2_EVENT_START_COUNT,
+    "event_end_count": ANOMALY_V2_EVENT_END_COUNT,
+    "event_min_duration_sec": ANOMALY_V2_EVENT_MIN_DURATION_SEC,
+    "event_cooldown_sec": ANOMALY_V2_EVENT_COOLDOWN_SEC,
+    "sim_enabled": False,
+    "sim_weight": 0.3,
+    "sim_k": 5,
+    "debug_trace": False,
 }
 
 
@@ -257,6 +316,51 @@ def bootstrap_schema() -> None:
             "updated_at_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
             "UNIQUE KEY uk_dev_num (dev_num),"
             "INDEX idx_model_name (model_name)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS anomaly_score_v2 ("
+            "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+            "dev_num VARCHAR(50) NOT NULL,"
+            "device_timestamp BIGINT NOT NULL,"
+            "score_raw DOUBLE NOT NULL,"
+            "score_smooth DOUBLE NOT NULL,"
+            "feature_json JSON NULL,"
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+            "INDEX idx_v2_score_dev_ts (dev_num, device_timestamp),"
+            "INDEX idx_v2_score_created (created_at)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS anomaly_event_v2 ("
+            "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+            "event_id VARCHAR(128) NOT NULL,"
+            "dev_num VARCHAR(50) NOT NULL,"
+            "start_ts BIGINT NOT NULL,"
+            "end_ts BIGINT NOT NULL,"
+            "peak_score DOUBLE NOT NULL,"
+            "duration_sec INT NOT NULL,"
+            "event_level VARCHAR(16) NOT NULL,"
+            "decision_reason VARCHAR(128) NOT NULL,"
+            "shadow_mode TINYINT NOT NULL DEFAULT 1,"
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+            "UNIQUE KEY uk_v2_event_id (event_id),"
+            "INDEX idx_v2_event_dev_ts (dev_num, start_ts),"
+            "INDEX idx_v2_event_created (created_at)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS anomaly_review_label_v2 ("
+            "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+            "event_id VARCHAR(128) NOT NULL,"
+            "label VARCHAR(16) NOT NULL,"
+            "reviewer VARCHAR(64) NULL,"
+            "note VARCHAR(500) NULL,"
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            "UNIQUE KEY uk_review_event_id (event_id),"
+            "INDEX idx_review_label (label),"
+            "INDEX idx_review_updated (updated_at)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         ),
     ]
@@ -568,22 +672,7 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
         }
         RUNTIME_METRICS["process_insufficient"] += 1
     else:
-        try:
-            result = await call_model_service(dev_num, points, model_name, device_timestamp)
-            RUNTIME_METRICS["process_ok"] += 1
-        except httpx.TimeoutException:
-            result = {
-                "request_id": str(uuid.uuid4()),
-                "is_anomaly": False,
-                "anomaly_score": 0.0,
-                "threshold": 0.0,
-                "model_name": model_name,
-                "model_version": None,
-                "infer_latency_ms": int(MODEL_TIMEOUT_SECONDS * 1000),
-                "status": "model_timeout",
-            }
-            RUNTIME_METRICS["process_model_timeout"] += 1
-        except Exception:
+        if not MODEL_SERVICE_ENABLED:
             result = {
                 "request_id": str(uuid.uuid4()),
                 "is_anomaly": False,
@@ -592,9 +681,37 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
                 "model_name": model_name,
                 "model_version": None,
                 "infer_latency_ms": 0,
-                "status": "model_error",
+                "status": "model_skipped",
             }
-            RUNTIME_METRICS["process_model_error"] += 1
+            RUNTIME_METRICS["process_model_skipped"] += 1
+        else:
+            try:
+                result = await call_model_service(dev_num, points, model_name, device_timestamp)
+                RUNTIME_METRICS["process_ok"] += 1
+            except httpx.TimeoutException:
+                result = {
+                    "request_id": str(uuid.uuid4()),
+                    "is_anomaly": False,
+                    "anomaly_score": 0.0,
+                    "threshold": 0.0,
+                    "model_name": model_name,
+                    "model_version": None,
+                    "infer_latency_ms": int(MODEL_TIMEOUT_SECONDS * 1000),
+                    "status": "model_timeout",
+                }
+                RUNTIME_METRICS["process_model_timeout"] += 1
+            except Exception:
+                result = {
+                    "request_id": str(uuid.uuid4()),
+                    "is_anomaly": False,
+                    "anomaly_score": 0.0,
+                    "threshold": 0.0,
+                    "model_name": model_name,
+                    "model_version": None,
+                    "infer_latency_ms": 0,
+                    "status": "model_error",
+                }
+                RUNTIME_METRICS["process_model_error"] += 1
 
     save_detection_log(dev_num, device_timestamp, points, result)
 
@@ -620,6 +737,30 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
     }
 
     save_fault_archive(event_payload)
+
+    anomaly_v2_payload: Optional[Dict[str, Any]] = None
+    v2_enabled = bool(ANOMALY_V2_RUNTIME.get("enabled", ANOMALY_V2_ENABLED))
+    if v2_enabled:
+        try:
+            # v2 特征不强依赖 T 窗口；当主流程窗口过短时，回补“按条数”历史样本，避免长期无法触发 v2
+            v2_points = points
+            v2_min_points = int(ANOMALY_V2_RUNTIME.get("min_points", ANOMALY_V2_MIN_POINTS))
+            if len(v2_points) < v2_min_points:
+                v2_points = fetch_window(dev_num, device_timestamp, max(WINDOW_N, v2_min_points), 0)
+            anomaly_v2_payload = run_anomaly_v2(dev_num, device_timestamp, v2_points)
+        except Exception:
+            RUNTIME_METRICS["anomaly_v2_errors"] += 1
+
+    if anomaly_v2_payload:
+        event_payload["anomaly_v2"] = {
+            "enabled": anomaly_v2_payload.get("enabled", False),
+            "shadow_mode": anomaly_v2_payload.get("shadow_mode", True),
+            "score_raw": anomaly_v2_payload.get("score_raw"),
+            "score_smooth": anomaly_v2_payload.get("score_smooth"),
+            "event": anomaly_v2_payload.get("event"),
+            "debug": anomaly_v2_payload.get("debug"),
+        }
+
     pending_latest_map[dev_num] = event_payload
 
     # 诊断流（完整事件）
@@ -678,6 +819,90 @@ async def schedule_home_event(payload: Dict[str, Any]) -> None:
         if latest_item.get("mark"):
             await event_bus.publish_home("anomaly_mark", latest_item["mark"])
         pending_latest_map.pop(to_dev, None)
+
+
+def save_anomaly_v2_score(
+    dev_num: str,
+    device_timestamp: int,
+    score_raw: float,
+    score_smooth: float,
+    features: Dict[str, Any],
+) -> None:
+    execute(
+        "INSERT INTO anomaly_score_v2 "
+        "(dev_num, device_timestamp, score_raw, score_smooth, feature_json) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (
+            dev_num,
+            device_timestamp,
+            float(score_raw),
+            float(score_smooth),
+            json.dumps(features, ensure_ascii=False),
+        ),
+    )
+
+
+def save_anomaly_v2_event(event: Dict[str, Any]) -> None:
+    execute(
+        "INSERT INTO anomaly_event_v2 "
+        "(event_id, dev_num, start_ts, end_ts, peak_score, duration_sec, event_level, decision_reason, shadow_mode) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "ON DUPLICATE KEY UPDATE "
+        "end_ts=VALUES(end_ts), "
+        "peak_score=VALUES(peak_score), "
+        "duration_sec=VALUES(duration_sec), "
+        "event_level=VALUES(event_level), "
+        "decision_reason=VALUES(decision_reason), "
+        "shadow_mode=VALUES(shadow_mode)",
+        (
+            event.get("event_id"),
+            event.get("dev_num"),
+            event.get("start_ts"),
+            event.get("end_ts"),
+            event.get("peak_score"),
+            event.get("duration_sec"),
+            event.get("event_level"),
+            event.get("decision_reason"),
+            1 if event.get("shadow_mode") else 0,
+        ),
+    )
+
+
+def run_anomaly_v2(dev_num: str, device_timestamp: int, points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    result = v2_pipeline.run_v2_pipeline(
+        dev_num=dev_num,
+        device_timestamp=device_timestamp,
+        points=points,
+        runtime=ANOMALY_V2_RUNTIME,
+        state_by_dev=ANOMALY_V2_STATE_BY_DEV,
+        refs_by_dev=ANOMALY_V2_REF_WINDOWS_BY_DEV,
+        save_score=save_anomaly_v2_score,
+        save_event=save_anomaly_v2_event,
+        default_enabled=ANOMALY_V2_ENABLED,
+        default_min_points=ANOMALY_V2_MIN_POINTS,
+        default_alpha=ANOMALY_V2_ALPHA,
+        default_warn_threshold=ANOMALY_V2_WARN_THRESHOLD,
+        default_recover_threshold=ANOMALY_V2_RECOVER_THRESHOLD,
+        default_event_start_count=ANOMALY_V2_EVENT_START_COUNT,
+        default_event_end_count=ANOMALY_V2_EVENT_END_COUNT,
+        default_event_min_duration_sec=ANOMALY_V2_EVENT_MIN_DURATION_SEC,
+        default_event_cooldown_sec=ANOMALY_V2_EVENT_COOLDOWN_SEC,
+        default_shadow_mode=ANOMALY_V2_SHADOW_MODE,
+    )
+    if not result:
+        return None
+
+    RUNTIME_METRICS["anomaly_v2_runs"] += 1
+    event_record = result.get("event")
+    if event_record:
+        RUNTIME_METRICS["anomaly_v2_events"] += 1
+        if bool(result.get("shadow_mode")):
+            RUNTIME_METRICS["anomaly_v2_shadow_events"] += 1
+
+    debug_payload = result.get("debug")
+    if isinstance(debug_payload, dict):
+        ANOMALY_V2_LAST_DEBUG_BY_DEV[dev_num] = debug_payload
+    return result
 
 
 # -----------------------------
@@ -1148,12 +1373,842 @@ def diagnosis_replay(req: ReplayRequest):
     return ok({"task_id": task_id, "accepted": True})
 
 
+@app.get("/api/diagnosis/replay/compare")
+def diagnosis_replay_compare(
+    dev_num: str = Query("", max_length=50),
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    conditions = ["device_timestamp BETWEEN %s AND %s"]
+    params: List[Any] = [start_ts, end_ts]
+
+    if dev_num.strip():
+        conditions.append("dev_num = %s")
+        params.append(dev_num.strip())
+
+    where_clause_detection = " AND ".join(conditions)
+
+    v1_anomaly_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM detection_result_log WHERE " + where_clause_detection + " AND is_anomaly=1",
+        tuple(params),
+    )
+    v1_point_anomaly_count = int(v1_anomaly_rows[0]["cnt"]) if v1_anomaly_rows else 0
+
+    v1_event_conditions = ["display_mark_ts BETWEEN %s AND %s"]
+    v1_event_params: List[Any] = [start_ts, end_ts]
+    if dev_num.strip():
+        v1_event_conditions.append("dev_num = %s")
+        v1_event_params.append(dev_num.strip())
+
+    v1_event_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event WHERE " + " AND ".join(v1_event_conditions),
+        tuple(v1_event_params),
+    )
+    v1_event_count = int(v1_event_rows[0]["cnt"]) if v1_event_rows else 0
+
+    v2_event_conditions = ["start_ts <= %s", "end_ts >= %s"]
+    v2_event_params: List[Any] = [end_ts, start_ts]
+    if dev_num.strip():
+        v2_event_conditions.append("dev_num = %s")
+        v2_event_params.append(dev_num.strip())
+
+    v2_event_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event_v2 WHERE " + " AND ".join(v2_event_conditions),
+        tuple(v2_event_params),
+    )
+    v2_event_count = int(v2_event_rows[0]["cnt"]) if v2_event_rows else 0
+
+    v2_shadow_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event_v2 WHERE " + " AND ".join(v2_event_conditions) + " AND shadow_mode=1",
+        tuple(v2_event_params),
+    )
+    v2_shadow_count = int(v2_shadow_rows[0]["cnt"]) if v2_shadow_rows else 0
+
+    v2_level_rows = query_all(
+        "SELECT event_level, COUNT(*) AS cnt FROM anomaly_event_v2 WHERE "
+        + " AND ".join(v2_event_conditions)
+        + " GROUP BY event_level",
+        tuple(v2_event_params),
+    )
+    v2_level_dist: Dict[str, int] = {str(r["event_level"]): int(r["cnt"]) for r in v2_level_rows}
+
+    return ok(
+        {
+            "scope": {
+                "dev_num": dev_num.strip() or None,
+                "start_ts": start_ts,
+                "end_ts": end_ts,
+            },
+            "v1": {
+                "point_anomaly_count": v1_point_anomaly_count,
+                "event_count": v1_event_count,
+            },
+            "v2": {
+                "event_count": v2_event_count,
+                "shadow_event_count": v2_shadow_count,
+                "event_level_distribution": v2_level_dist,
+            },
+            "delta": {
+                "event_count_diff_v2_minus_v1": v2_event_count - v1_event_count,
+            },
+        }
+    )
+
+
+@app.get("/api/diagnosis/replay/report")
+def diagnosis_replay_report(
+    dev_num: str = Query("", max_length=50),
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    target_false_alarm_per_day: float = Query(5.0, ge=0.0),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    compare_resp = diagnosis_replay_compare(dev_num=dev_num, start_ts=start_ts, end_ts=end_ts)
+    if compare_resp.get("code") != 0:
+        return compare_resp
+
+    data = compare_resp.get("data") or {}
+    v1 = data.get("v1") or {}
+    v2 = data.get("v2") or {}
+
+    span_days = max(1e-6, (end_ts - start_ts) / 86_400_000)
+    v1_event_count = int(v1.get("event_count") or 0)
+    v2_event_count = int(v2.get("event_count") or 0)
+    v2_shadow_count = int(v2.get("shadow_event_count") or 0)
+
+    v1_false_alarm_per_day = round(v1_event_count / span_days, 3)
+    v2_false_alarm_per_day = round(v2_event_count / span_days, 3)
+
+    acceptance_checks = {
+        "shadow_mode_only": ANOMALY_V2_SHADOW_MODE,
+        "v2_false_alarm_per_day_le_target": v2_false_alarm_per_day <= target_false_alarm_per_day,
+        "api_ok": True,
+    }
+    accepted = all(acceptance_checks.values())
+
+    summary_lines = [
+        "# Shadow Run Acceptance Report",
+        "",
+        f"- dev_num: {dev_num.strip() or 'ALL'}",
+        f"- start_ts: {start_ts}",
+        f"- end_ts: {end_ts}",
+        f"- span_days: {span_days:.3f}",
+        "",
+        "## V1 vs V2",
+        f"- v1_event_count: {v1_event_count}",
+        f"- v2_event_count: {v2_event_count}",
+        f"- v2_shadow_event_count: {v2_shadow_count}",
+        f"- v1_false_alarm_per_day: {v1_false_alarm_per_day}",
+        f"- v2_false_alarm_per_day: {v2_false_alarm_per_day}",
+        "",
+        "## Acceptance",
+        f"- target_false_alarm_per_day: {target_false_alarm_per_day}",
+        f"- shadow_mode_only: {acceptance_checks['shadow_mode_only']}",
+        f"- v2_false_alarm_per_day_le_target: {acceptance_checks['v2_false_alarm_per_day_le_target']}",
+        f"- accepted: {accepted}",
+    ]
+
+    return ok(
+        {
+            "scope": data.get("scope"),
+            "v1": v1,
+            "v2": v2,
+            "delta": data.get("delta"),
+            "metrics": {
+                "span_days": span_days,
+                "v1_false_alarm_per_day": v1_false_alarm_per_day,
+                "v2_false_alarm_per_day": v2_false_alarm_per_day,
+            },
+            "acceptance": {
+                "target_false_alarm_per_day": target_false_alarm_per_day,
+                "checks": acceptance_checks,
+                "accepted": accepted,
+            },
+            "summary_markdown": "\n".join(summary_lines),
+        }
+    )
+
+
 @app.get("/api/diagnosis/replay/{task_id}")
 def diagnosis_replay_status(task_id: str = Path(...)):
     task = REPLAY_TASKS.get(task_id)
     if not task:
         return fail(404, "task not found")
     return ok(task)
+
+
+@app.post("/api/diagnosis/replay/recent/{dev_num}")
+async def diagnosis_replay_recent_device(
+    dev_num: str = Path(...),
+    points: int = Query(50, ge=5, le=1000),
+    queued: int = Query(0, ge=0, le=1),
+):
+    rows = query_all(
+        "SELECT device_timestamp FROM device_monitoring_data "
+        "WHERE dev_num=%s ORDER BY device_timestamp DESC LIMIT %s",
+        (dev_num, points),
+    )
+    if not rows:
+        return fail(1002, f"no data for dev_num={dev_num}")
+
+    timestamps = [int(r["device_timestamp"]) for r in reversed(rows)]
+
+    ok_count = 0
+    fail_count = 0
+    last_error = ""
+
+    for ts in timestamps:
+        try:
+            if queued == 1:
+                await enqueue_device_process(dev_num, ts)
+            else:
+                await process_latest_for_device(dev_num, ts)
+            ok_count += 1
+        except Exception as err:
+            fail_count += 1
+            last_error = str(err)
+
+    mode = "queued" if queued == 1 else "direct"
+    return ok(
+        {
+            "dev_num": dev_num,
+            "mode": mode,
+            "requested_points": points,
+            "processed_points": len(timestamps),
+            "ok_count": ok_count,
+            "fail_count": fail_count,
+            "start_ts": timestamps[0],
+            "end_ts": timestamps[-1],
+            "last_error": last_error,
+        }
+    )
+
+
+@app.get("/api/anomaly/v2/events/recent")
+def anomaly_v2_recent_events(
+    limit: int = Query(100, ge=1, le=2000),
+    dev_num: str = Query("", max_length=50),
+    shadow_mode: str = Query("all", pattern="^(all|true|false)$"),
+):
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    dev_num = dev_num.strip()
+    if dev_num:
+        conditions.append("dev_num LIKE %s")
+        params.append(f"%{dev_num}%")
+
+    if shadow_mode == "true":
+        conditions.append("shadow_mode=1")
+    elif shadow_mode == "false":
+        conditions.append("shadow_mode=0")
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = query_all(
+        "SELECT event_id, dev_num, start_ts, end_ts, peak_score, duration_sec, event_level, decision_reason, shadow_mode, created_at "
+        f"FROM anomaly_event_v2{where_clause} ORDER BY end_ts DESC LIMIT %s",
+        tuple(params + [limit]),
+    )
+    for row in rows:
+        row["shadow_mode"] = bool(row.get("shadow_mode"))
+    return ok({"limit": limit, "dev_num": dev_num, "shadow_mode": shadow_mode, "items": rows})
+
+
+@app.get("/api/anomaly/v2/review/topk")
+def anomaly_v2_review_topk(
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    limit: int = Query(30, ge=1, le=500),
+    dev_num: str = Query("", max_length=50),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    dev_num = dev_num.strip()
+    conditions = ["start_ts <= %s", "end_ts >= %s"]
+    params: List[Any] = [end_ts, start_ts]
+    if dev_num:
+        conditions.append("dev_num = %s")
+        params.append(dev_num)
+
+    rows = query_all(
+        "SELECT event_id, dev_num, start_ts, end_ts, peak_score, duration_sec, event_level, decision_reason, shadow_mode, created_at "
+        "FROM anomaly_event_v2 WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY peak_score DESC, duration_sec DESC LIMIT %s",
+        tuple(params + [limit]),
+    )
+    for row in rows:
+        row["shadow_mode"] = bool(row.get("shadow_mode"))
+
+    return ok(
+        {
+            "scope": {"start_ts": start_ts, "end_ts": end_ts, "dev_num": dev_num or None},
+            "limit": limit,
+            "items": rows,
+        }
+    )
+
+
+@app.post("/api/anomaly/v2/review/label")
+def anomaly_v2_review_label(req: AnomalyV2ReviewLabelRequest):
+    event_id = req.event_id.strip()
+    if not event_id:
+        return fail(1007, "event_id is required")
+
+    exists = query_all("SELECT 1 AS ok FROM anomaly_event_v2 WHERE event_id=%s LIMIT 1", (event_id,))
+    if not exists:
+        return fail(404, "event not found")
+
+    execute(
+        "INSERT INTO anomaly_review_label_v2 (event_id, label, reviewer, note) "
+        "VALUES (%s,%s,%s,%s) "
+        "ON DUPLICATE KEY UPDATE label=VALUES(label), reviewer=VALUES(reviewer), note=VALUES(note)",
+        (event_id, req.label, req.reviewer.strip(), req.note.strip()),
+    )
+
+    row = query_all(
+        "SELECT event_id, label, reviewer, note, created_at, updated_at "
+        "FROM anomaly_review_label_v2 WHERE event_id=%s LIMIT 1",
+        (event_id,),
+    )
+    return ok({"item": row[0] if row else None})
+
+
+@app.get("/api/anomaly/v2/review/labels")
+def anomaly_v2_review_labels(
+    label: str = Query("all", pattern="^(all|true|false|uncertain)$"),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    conditions: List[str] = []
+    params: List[Any] = []
+    if label != "all":
+        conditions.append("l.label=%s")
+        params.append(label)
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = query_all(
+        "SELECT l.event_id, l.label, l.reviewer, l.note, l.updated_at, "
+        "e.dev_num, e.start_ts, e.end_ts, e.peak_score, e.duration_sec, e.event_level "
+        "FROM anomaly_review_label_v2 l "
+        "JOIN anomaly_event_v2 e ON e.event_id=l.event_id"
+        f"{where_clause} ORDER BY l.updated_at DESC LIMIT %s",
+        tuple(params + [limit]),
+    )
+    return ok({"label": label, "limit": limit, "items": rows})
+
+
+@app.get("/api/anomaly/v2/review/topk/export")
+def anomaly_v2_review_topk_export(
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+    dev_num: str = Query("", max_length=50),
+):
+    if end_ts <= start_ts:
+        return PlainTextResponse("end_ts must be greater than start_ts", status_code=400)
+
+    dev_num = dev_num.strip()
+    conditions = ["start_ts <= %s", "end_ts >= %s"]
+    params: List[Any] = [end_ts, start_ts]
+    if dev_num:
+        conditions.append("dev_num = %s")
+        params.append(dev_num)
+
+    rows = query_all(
+        "SELECT event_id, dev_num, start_ts, end_ts, peak_score, duration_sec, event_level, decision_reason, shadow_mode, created_at "
+        "FROM anomaly_event_v2 WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY peak_score DESC, duration_sec DESC LIMIT %s",
+        tuple(params + [limit]),
+    )
+
+    header = [
+        "event_id",
+        "dev_num",
+        "start_ts",
+        "end_ts",
+        "peak_score",
+        "duration_sec",
+        "event_level",
+        "decision_reason",
+        "shadow_mode",
+        "created_at",
+    ]
+    lines = [",".join(header)]
+    for row in rows:
+        vals = []
+        for k in header:
+            v = row.get(k, "")
+            s = str(v).replace('"', '""')
+            vals.append(f'"{s}"')
+        lines.append(",".join(vals))
+
+    csv_content = "\n".join(lines)
+    filename = "anomaly_v2_review_topk.csv"
+    return PlainTextResponse(
+        content=csv_content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/api/anomaly/v2/shadow/summary")
+def anomaly_v2_shadow_summary(
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    top_n: int = Query(10, ge=1, le=100),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    score_rows = query_all(
+        "SELECT COUNT(*) AS cnt, AVG(score_raw) AS avg_raw, AVG(score_smooth) AS avg_smooth, "
+        "MAX(score_smooth) AS max_smooth "
+        "FROM anomaly_score_v2 WHERE device_timestamp BETWEEN %s AND %s",
+        (start_ts, end_ts),
+    )
+    score_stats = score_rows[0] if score_rows else {"cnt": 0, "avg_raw": None, "avg_smooth": None, "max_smooth": None}
+
+    event_rows = query_all(
+        "SELECT COUNT(*) AS total_events, "
+        "SUM(CASE WHEN shadow_mode=1 THEN 1 ELSE 0 END) AS shadow_events, "
+        "AVG(duration_sec) AS avg_duration_sec, "
+        "MAX(peak_score) AS max_peak_score "
+        "FROM anomaly_event_v2 WHERE start_ts <= %s AND end_ts >= %s",
+        (end_ts, start_ts),
+    )
+    event_stats = event_rows[0] if event_rows else {"total_events": 0, "shadow_events": 0, "avg_duration_sec": None, "max_peak_score": None}
+
+    level_rows = query_all(
+        "SELECT event_level, COUNT(*) AS cnt FROM anomaly_event_v2 "
+        "WHERE start_ts <= %s AND end_ts >= %s GROUP BY event_level",
+        (end_ts, start_ts),
+    )
+    level_distribution: Dict[str, int] = {str(r["event_level"]): int(r["cnt"]) for r in level_rows}
+
+    top_devices = query_all(
+        "SELECT dev_num, COUNT(*) AS event_count, MAX(peak_score) AS peak_score_max, "
+        "AVG(duration_sec) AS duration_avg_sec "
+        "FROM anomaly_event_v2 WHERE start_ts <= %s AND end_ts >= %s "
+        "GROUP BY dev_num ORDER BY event_count DESC, peak_score_max DESC LIMIT %s",
+        (end_ts, start_ts, top_n),
+    )
+
+    return ok(
+        {
+            "scope": {"start_ts": start_ts, "end_ts": end_ts},
+            "score_stats": {
+                "count": int(score_stats.get("cnt") or 0),
+                "avg_raw": score_stats.get("avg_raw"),
+                "avg_smooth": score_stats.get("avg_smooth"),
+                "max_smooth": score_stats.get("max_smooth"),
+            },
+            "event_stats": {
+                "total_events": int(event_stats.get("total_events") or 0),
+                "shadow_events": int(event_stats.get("shadow_events") or 0),
+                "avg_duration_sec": event_stats.get("avg_duration_sec"),
+                "max_peak_score": event_stats.get("max_peak_score"),
+                "level_distribution": level_distribution,
+            },
+            "top_devices": top_devices,
+        }
+    )
+
+
+@app.get("/api/anomaly/v2/eval/summary")
+def anomaly_v2_eval_summary():
+    rows = query_all(
+        "SELECT l.label, COUNT(*) AS cnt FROM anomaly_review_label_v2 l GROUP BY l.label"
+    )
+    label_cnt: Dict[str, int] = {str(r["label"]): int(r["cnt"]) for r in rows}
+
+    true_cnt = int(label_cnt.get("true", 0))
+    false_cnt = int(label_cnt.get("false", 0))
+    uncertain_cnt = int(label_cnt.get("uncertain", 0))
+    total_cnt = true_cnt + false_cnt + uncertain_cnt
+
+    reviewed_rows = query_all(
+        "SELECT e.event_id, e.peak_score, l.label "
+        "FROM anomaly_event_v2 e "
+        "JOIN anomaly_review_label_v2 l ON e.event_id=l.event_id"
+    )
+
+    pred_positive = 0
+    tp = 0
+    fp = 0
+    fn = 0
+
+    for r in reviewed_rows:
+        score = float(r.get("peak_score") or 0.0)
+        label = str(r.get("label") or "")
+        pred = score >= float(ANOMALY_V2_RUNTIME.get("warn_threshold", ANOMALY_V2_WARN_THRESHOLD))
+        actual = label == "true"
+
+        if pred:
+            pred_positive += 1
+        if pred and actual:
+            tp += 1
+        if pred and not actual and label == "false":
+            fp += 1
+        if (not pred) and actual:
+            fn += 1
+
+    precision = (tp / (tp + fp)) if (tp + fp) > 0 else None
+    recall = (tp / (tp + fn)) if (tp + fn) > 0 else None
+    f1 = (2 * precision * recall / (precision + recall)) if precision is not None and recall is not None and (precision + recall) > 0 else None
+
+    return ok(
+        {
+            "review_stats": {
+                "total": total_cnt,
+                "true": true_cnt,
+                "false": false_cnt,
+                "uncertain": uncertain_cnt,
+            },
+            "confusion_like": {
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "pred_positive": pred_positive,
+            },
+            "metrics": {
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+            },
+            "note": "Evaluation is based on reviewed labels only; uncertain labels are excluded from fp/fn.",
+        }
+    )
+
+
+@app.get("/api/anomaly/v2/drift/summary")
+def anomaly_v2_drift_summary(
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    dev_num: str = Query("", max_length=50),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    dev_num = dev_num.strip()
+    conditions = ["device_timestamp BETWEEN %s AND %s"]
+    params: List[Any] = [start_ts, end_ts]
+    if dev_num:
+        conditions.append("dev_num = %s")
+        params.append(dev_num)
+
+    rows = query_all(
+        "SELECT device_timestamp, score_smooth FROM anomaly_score_v2 WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY device_timestamp ASC",
+        tuple(params),
+    )
+    if len(rows) < 10:
+        return ok(
+            {
+                "scope": {"start_ts": start_ts, "end_ts": end_ts, "dev_num": dev_num or None},
+                "count": len(rows),
+                "drift": {"flag": False, "reason": "insufficient_points", "score": 0.0},
+            }
+        )
+
+    vals = [float(r["score_smooth"]) for r in rows if r.get("score_smooth") is not None]
+    n = len(vals)
+    if n < 10:
+        return ok(
+            {
+                "scope": {"start_ts": start_ts, "end_ts": end_ts, "dev_num": dev_num or None},
+                "count": n,
+                "drift": {"flag": False, "reason": "insufficient_points", "score": 0.0},
+            }
+        )
+
+    mid = n // 2
+    a = vals[:mid]
+    b = vals[mid:]
+    mean_a = sum(a) / len(a)
+    mean_b = sum(b) / len(b)
+
+    def _std(xs: List[float]) -> float:
+        m = sum(xs) / len(xs)
+        return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
+
+    std_a = _std(a)
+    std_b = _std(b)
+    std_base = max(1e-6, (std_a + std_b) / 2)
+
+    mean_shift = mean_b - mean_a
+    shift_ratio = abs(mean_shift) / std_base
+    std_ratio = (std_b + 1e-6) / (std_a + 1e-6)
+
+    drift_score = min(10.0, shift_ratio + abs(std_ratio - 1.0))
+    drift_flag = drift_score >= 2.0
+
+    return ok(
+        {
+            "scope": {"start_ts": start_ts, "end_ts": end_ts, "dev_num": dev_num or None},
+            "count": n,
+            "stats": {
+                "mean_first_half": mean_a,
+                "mean_second_half": mean_b,
+                "std_first_half": std_a,
+                "std_second_half": std_b,
+                "mean_shift": mean_shift,
+                "std_ratio": std_ratio,
+            },
+            "drift": {
+                "flag": drift_flag,
+                "score": drift_score,
+                "threshold": 2.0,
+                "method": "half_window_mean_std_shift",
+            },
+        }
+    )
+
+
+@app.get("/api/anomaly/v2/report/weekly")
+def anomaly_v2_weekly_report(
+    start_ts: int = Query(..., ge=0),
+    end_ts: int = Query(..., ge=0),
+    dev_num: str = Query("", max_length=50),
+    top_n: int = Query(10, ge=1, le=100),
+):
+    if end_ts <= start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    dev_num = dev_num.strip()
+
+    # Compare v1/v2
+    compare_conditions = ["device_timestamp BETWEEN %s AND %s"]
+    compare_params: List[Any] = [start_ts, end_ts]
+    if dev_num:
+        compare_conditions.append("dev_num = %s")
+        compare_params.append(dev_num)
+
+    where_clause_detection = " AND ".join(compare_conditions)
+
+    v1_anomaly_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM detection_result_log WHERE " + where_clause_detection + " AND is_anomaly=1",
+        tuple(compare_params),
+    )
+    v1_point_anomaly_count = int(v1_anomaly_rows[0]["cnt"]) if v1_anomaly_rows else 0
+
+    v1_event_conditions = ["display_mark_ts BETWEEN %s AND %s"]
+    v1_event_params: List[Any] = [start_ts, end_ts]
+    if dev_num:
+        v1_event_conditions.append("dev_num = %s")
+        v1_event_params.append(dev_num)
+
+    v1_event_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event WHERE " + " AND ".join(v1_event_conditions),
+        tuple(v1_event_params),
+    )
+    v1_event_count = int(v1_event_rows[0]["cnt"]) if v1_event_rows else 0
+
+    v2_event_conditions = ["start_ts <= %s", "end_ts >= %s"]
+    v2_event_params: List[Any] = [end_ts, start_ts]
+    if dev_num:
+        v2_event_conditions.append("dev_num = %s")
+        v2_event_params.append(dev_num)
+
+    v2_event_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event_v2 WHERE " + " AND ".join(v2_event_conditions),
+        tuple(v2_event_params),
+    )
+    v2_event_count = int(v2_event_rows[0]["cnt"]) if v2_event_rows else 0
+
+    v2_shadow_rows = query_all(
+        "SELECT COUNT(*) AS cnt FROM anomaly_event_v2 WHERE " + " AND ".join(v2_event_conditions) + " AND shadow_mode=1",
+        tuple(v2_event_params),
+    )
+    v2_shadow_count = int(v2_shadow_rows[0]["cnt"]) if v2_shadow_rows else 0
+
+    v2_level_rows = query_all(
+        "SELECT event_level, COUNT(*) AS cnt FROM anomaly_event_v2 WHERE "
+        + " AND ".join(v2_event_conditions)
+        + " GROUP BY event_level",
+        tuple(v2_event_params),
+    )
+    v2_level_distribution: Dict[str, int] = {str(r["event_level"]): int(r["cnt"]) for r in v2_level_rows}
+
+    # Shadow summary
+    score_conditions = ["device_timestamp BETWEEN %s AND %s"]
+    score_params: List[Any] = [start_ts, end_ts]
+    if dev_num:
+        score_conditions.append("dev_num = %s")
+        score_params.append(dev_num)
+
+    score_rows = query_all(
+        "SELECT COUNT(*) AS cnt, AVG(score_raw) AS avg_raw, AVG(score_smooth) AS avg_smooth, "
+        "MAX(score_smooth) AS max_smooth "
+        "FROM anomaly_score_v2 WHERE " + " AND ".join(score_conditions),
+        tuple(score_params),
+    )
+    score_stats = score_rows[0] if score_rows else {"cnt": 0, "avg_raw": None, "avg_smooth": None, "max_smooth": None}
+
+    event_rows = query_all(
+        "SELECT COUNT(*) AS total_events, "
+        "SUM(CASE WHEN shadow_mode=1 THEN 1 ELSE 0 END) AS shadow_events, "
+        "AVG(duration_sec) AS avg_duration_sec, "
+        "MAX(peak_score) AS max_peak_score "
+        "FROM anomaly_event_v2 WHERE " + " AND ".join(v2_event_conditions),
+        tuple(v2_event_params),
+    )
+    event_stats = event_rows[0] if event_rows else {"total_events": 0, "shadow_events": 0, "avg_duration_sec": None, "max_peak_score": None}
+
+    top_devices_conditions = ["start_ts <= %s", "end_ts >= %s"]
+    top_devices_params: List[Any] = [end_ts, start_ts]
+    if dev_num:
+        top_devices_conditions.append("dev_num = %s")
+        top_devices_params.append(dev_num)
+
+    top_devices = query_all(
+        "SELECT dev_num, COUNT(*) AS event_count, MAX(peak_score) AS peak_score_max, "
+        "AVG(duration_sec) AS duration_avg_sec "
+        "FROM anomaly_event_v2 WHERE "
+        + " AND ".join(top_devices_conditions)
+        + " GROUP BY dev_num ORDER BY event_count DESC, peak_score_max DESC LIMIT %s",
+        tuple(top_devices_params + [top_n]),
+    )
+
+    key_events = query_all(
+        "SELECT event_id, dev_num, start_ts, end_ts, peak_score, duration_sec, event_level, decision_reason, shadow_mode, created_at "
+        "FROM anomaly_event_v2 WHERE "
+        + " AND ".join(v2_event_conditions)
+        + " ORDER BY peak_score DESC, duration_sec DESC LIMIT 20",
+        tuple(v2_event_params),
+    )
+    for row in key_events:
+        row["shadow_mode"] = bool(row.get("shadow_mode"))
+
+    report_title = "anomaly_v2_weekly_report"
+    if dev_num:
+        report_title = f"anomaly_v2_weekly_report_{dev_num}"
+
+    return ok(
+        {
+            "report": {
+                "name": report_title,
+                "generated_at": now_ms(),
+                "scope": {"start_ts": start_ts, "end_ts": end_ts, "dev_num": dev_num or None},
+            },
+            "comparison": {
+                "v1": {
+                    "point_anomaly_count": v1_point_anomaly_count,
+                    "event_count": v1_event_count,
+                },
+                "v2": {
+                    "event_count": v2_event_count,
+                    "shadow_event_count": v2_shadow_count,
+                    "event_level_distribution": v2_level_distribution,
+                },
+                "delta": {
+                    "event_count_diff_v2_minus_v1": v2_event_count - v1_event_count,
+                },
+            },
+            "shadow_summary": {
+                "score_stats": {
+                    "count": int(score_stats.get("cnt") or 0),
+                    "avg_raw": score_stats.get("avg_raw"),
+                    "avg_smooth": score_stats.get("avg_smooth"),
+                    "max_smooth": score_stats.get("max_smooth"),
+                },
+                "event_stats": {
+                    "total_events": int(event_stats.get("total_events") or 0),
+                    "shadow_events": int(event_stats.get("shadow_events") or 0),
+                    "avg_duration_sec": event_stats.get("avg_duration_sec"),
+                    "max_peak_score": event_stats.get("max_peak_score"),
+                },
+                "top_devices": top_devices,
+            },
+            "key_events": key_events,
+        }
+    )
+
+
+@app.get("/api/anomaly/v2/control")
+def get_anomaly_v2_control(dev_num: str = Query("", max_length=50)):
+    dev = dev_num.strip()
+    data: Dict[str, Any] = {"config": ANOMALY_V2_RUNTIME}
+    if dev:
+        data["debug_last"] = ANOMALY_V2_LAST_DEBUG_BY_DEV.get(dev)
+    return ok(data)
+
+
+@app.post("/api/anomaly/v2/control")
+def set_anomaly_v2_control(req: AnomalyV2ControlRequest):
+    updates: Dict[str, Any] = {}
+
+    if req.enabled is not None:
+        ANOMALY_V2_RUNTIME["enabled"] = bool(req.enabled)
+        updates["enabled"] = ANOMALY_V2_RUNTIME["enabled"]
+    if req.shadow_mode is not None:
+        ANOMALY_V2_RUNTIME["shadow_mode"] = bool(req.shadow_mode)
+        updates["shadow_mode"] = ANOMALY_V2_RUNTIME["shadow_mode"]
+    if req.alpha is not None:
+        if not (0.0 < req.alpha <= 1.0):
+            return fail(1006, "alpha must be in (0, 1]")
+        ANOMALY_V2_RUNTIME["alpha"] = float(req.alpha)
+        updates["alpha"] = ANOMALY_V2_RUNTIME["alpha"]
+    if req.warn_threshold is not None:
+        if not (0.0 <= req.warn_threshold <= 1.0):
+            return fail(1006, "warn_threshold must be in [0, 1]")
+        ANOMALY_V2_RUNTIME["warn_threshold"] = float(req.warn_threshold)
+        updates["warn_threshold"] = ANOMALY_V2_RUNTIME["warn_threshold"]
+    if req.recover_threshold is not None:
+        if not (0.0 <= req.recover_threshold <= 1.0):
+            return fail(1006, "recover_threshold must be in [0, 1]")
+        ANOMALY_V2_RUNTIME["recover_threshold"] = float(req.recover_threshold)
+        updates["recover_threshold"] = ANOMALY_V2_RUNTIME["recover_threshold"]
+    if req.min_points is not None:
+        if req.min_points < 2:
+            return fail(1006, "min_points must be >= 2")
+        ANOMALY_V2_RUNTIME["min_points"] = int(req.min_points)
+        updates["min_points"] = ANOMALY_V2_RUNTIME["min_points"]
+    if req.event_start_count is not None:
+        if req.event_start_count < 1:
+            return fail(1006, "event_start_count must be >= 1")
+        ANOMALY_V2_RUNTIME["event_start_count"] = int(req.event_start_count)
+        updates["event_start_count"] = ANOMALY_V2_RUNTIME["event_start_count"]
+    if req.event_end_count is not None:
+        if req.event_end_count < 1:
+            return fail(1006, "event_end_count must be >= 1")
+        ANOMALY_V2_RUNTIME["event_end_count"] = int(req.event_end_count)
+        updates["event_end_count"] = ANOMALY_V2_RUNTIME["event_end_count"]
+    if req.event_min_duration_sec is not None:
+        if req.event_min_duration_sec < 0:
+            return fail(1006, "event_min_duration_sec must be >= 0")
+        ANOMALY_V2_RUNTIME["event_min_duration_sec"] = int(req.event_min_duration_sec)
+        updates["event_min_duration_sec"] = ANOMALY_V2_RUNTIME["event_min_duration_sec"]
+    if req.event_cooldown_sec is not None:
+        if req.event_cooldown_sec < 0:
+            return fail(1006, "event_cooldown_sec must be >= 0")
+        ANOMALY_V2_RUNTIME["event_cooldown_sec"] = int(req.event_cooldown_sec)
+        updates["event_cooldown_sec"] = ANOMALY_V2_RUNTIME["event_cooldown_sec"]
+    if req.sim_enabled is not None:
+        ANOMALY_V2_RUNTIME["sim_enabled"] = bool(req.sim_enabled)
+        updates["sim_enabled"] = ANOMALY_V2_RUNTIME["sim_enabled"]
+    if req.sim_weight is not None:
+        if not (0.0 <= req.sim_weight <= 1.0):
+            return fail(1006, "sim_weight must be in [0, 1]")
+        ANOMALY_V2_RUNTIME["sim_weight"] = float(req.sim_weight)
+        updates["sim_weight"] = ANOMALY_V2_RUNTIME["sim_weight"]
+    if req.sim_k is not None:
+        if req.sim_k < 1:
+            return fail(1006, "sim_k must be >= 1")
+        ANOMALY_V2_RUNTIME["sim_k"] = int(req.sim_k)
+        updates["sim_k"] = ANOMALY_V2_RUNTIME["sim_k"]
+    if req.debug_trace is not None:
+        ANOMALY_V2_RUNTIME["debug_trace"] = bool(req.debug_trace)
+        updates["debug_trace"] = ANOMALY_V2_RUNTIME["debug_trace"]
+
+    return ok({"updated": updates, "config": ANOMALY_V2_RUNTIME, "updated_at": now_ms()})
 
 
 @app.get("/api/models")
@@ -1283,13 +2338,33 @@ def select_device_model(dev_num: str = Path(...), req: DeviceModelSelectRequest 
 
 
 @app.post("/api/internal/process/{dev_num}/{device_timestamp}")
-async def internal_process(dev_num: str, device_timestamp: int, queued: int = Query(1, ge=0, le=1)):
+async def internal_process(
+    dev_num: str,
+    device_timestamp: int,
+    queued: int = Query(1, ge=0, le=1),
+    fallback_latest: int = Query(1, ge=0, le=1),
+):
     """手工触发单设备单时间点检测（用于联调/测试）。queued=1 走合并队列，queued=0 立即执行。"""
-    if queued == 1:
-        result = await enqueue_device_process(dev_num, device_timestamp)
-        return ok({"dev_num": dev_num, "device_timestamp": device_timestamp, **result})
+    latest_row = query_all(
+        "SELECT MAX(device_timestamp) AS latest_ts FROM device_monitoring_data WHERE dev_num=%s",
+        (dev_num,),
+    )
+    latest_ts = int(latest_row[0]["latest_ts"]) if latest_row and latest_row[0].get("latest_ts") else 0
+    if latest_ts <= 0:
+        return fail(1002, f"no monitoring data for dev_num={dev_num}")
 
-    payload = await process_latest_for_device(dev_num, device_timestamp)
+    effective_ts = device_timestamp
+    if fallback_latest == 1 and device_timestamp > latest_ts:
+        effective_ts = latest_ts
+
+    if queued == 1:
+        result = await enqueue_device_process(dev_num, effective_ts)
+        return ok({"dev_num": dev_num, "device_timestamp": effective_ts, "latest_ts": latest_ts, **result})
+
+    payload = await process_latest_for_device(dev_num, effective_ts)
+    payload["requested_device_timestamp"] = device_timestamp
+    payload["effective_device_timestamp"] = effective_ts
+    payload["latest_ts"] = latest_ts
     return ok(payload)
 
 
@@ -1305,6 +2380,7 @@ def runtime_metrics():
         "model_call_retries": MODEL_CALL_RETRIES,
         "model_timeout_seconds": MODEL_TIMEOUT_SECONDS,
         "active_model_versions": ACTIVE_MODEL_VERSION,
+        "anomaly_v2": ANOMALY_V2_RUNTIME,
     })
 
 

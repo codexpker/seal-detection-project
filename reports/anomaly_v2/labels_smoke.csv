@@ -1,0 +1,2 @@
+event_id,label,reviewer,note
+nonexistent_event_for_smoke,true,agent,smoke

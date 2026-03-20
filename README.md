@@ -35,7 +35,11 @@ seal_detection_project/
 │   ├── App.vue                    # 前端主页面
 │   ├── api.js                     # 前端 API 封装
 │   ├── styles.css                 # 全局样式
-│   └── components/TrendChart.vue  # 曲线组件
+│   ├── components/TrendChart.vue  # 曲线组件
+│   └── anomaly_v2/
+│       ├── baseline.py            # 二期 baseline：特征/统计分数/相似度/融合
+│       ├── state_machine.py       # 事件迟滞状态机
+│       └── pipeline.py            # 二期主流程编排（被 backend_app 调用）
 └── docs/
     ├── 技术沉淀文档.md
     ├── 项目说明文档.md
@@ -63,6 +67,12 @@ mysql -u root -p bst < migration_mvp_backend.sql
 
 ```bash
 python3 -m uvicorn backend_app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+> 当前仓库默认没有独立 `model_service` 进程入口。若仅联调二期 v2，建议显式关闭一期模型调用：
+
+```bash
+export MODEL_SERVICE_ENABLED=false
 ```
 
 ### 4) 启动前端
@@ -100,6 +110,94 @@ python3 reader.py
 - `GET /api/diagnosis/recent`
 - `POST /api/diagnosis/replay`
 - `GET /api/diagnosis/replay/{task_id}`
+- `POST /api/diagnosis/replay/recent/{dev_num}?points=120&queued=0`（最近 N 点快速回放）
+- `GET /api/diagnosis/replay/compare?start_ts=&end_ts=&dev_num=`（一期/二期对照）
+
+### 二期（Anomaly v2）
+- `GET /api/anomaly/v2/control`
+- `POST /api/anomaly/v2/control`（运行时开关与调参）
+- `GET /api/anomaly/v2/events/recent`
+- `GET /api/anomaly/v2/shadow/summary`
+- `GET /api/anomaly/v2/report/weekly`
+- `GET /api/anomaly/v2/drift/summary`
+- `GET /api/anomaly/v2/review/topk`
+- `GET /api/anomaly/v2/review/topk/export`
+- `POST /api/anomaly/v2/review/label`
+- `GET /api/anomaly/v2/review/labels`
+
+---
+
+## 二期快速使用（建议流程）
+
+### 1) 开启二期影子模式
+
+```bash
+curl -s -X POST "http://localhost:8000/api/anomaly/v2/control" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "shadow_mode": true,
+    "alpha": 0.20,
+    "warn_threshold": 0.72,
+    "recover_threshold": 0.50,
+    "min_points": 5,
+    "event_start_count": 4,
+    "event_end_count": 6,
+    "event_min_duration_sec": 240,
+    "event_cooldown_sec": 900,
+    "sim_enabled": true,
+    "sim_weight": 0.30,
+    "sim_k": 5
+  }' | python3 -m json.tool
+```
+
+### 2) 跑最近 N 点回放（推荐联调方式）
+
+```bash
+curl -s -X POST "http://localhost:8000/api/diagnosis/replay/recent/000000060160526?points=120&queued=0" | python3 -m json.tool
+```
+
+### 3) 查看运行指标与汇总
+
+```bash
+curl -s "http://localhost:8000/api/runtime/metrics" | python3 -m json.tool
+END_TS=$(python3 - <<'PY'
+import time
+print(int(time.time()*1000))
+PY
+)
+START_TS=$((END_TS - 24*60*60*1000))
+curl -s "http://localhost:8000/api/anomaly/v2/shadow/summary?start_ts=${START_TS}&end_ts=${END_TS}&top_n=10" | python3 -m json.tool
+curl -s "http://localhost:8000/api/anomaly/v2/report/weekly?start_ts=${START_TS}&end_ts=${END_TS}&dev_num=000000060160526&top_n=10" | python3 -m json.tool
+```
+
+### 4) 自动生成日报（JSON + CSV）
+
+```bash
+python3 src/scripts/anomaly_v2_daily_report.py \
+  --base-url http://localhost:8000 \
+  --hours 24 \
+  --dev-num 000000060160526 \
+  --top-n 10 \
+  --out-dir reports/anomaly_v2
+```
+
+### 5) 批量回灌人工标注（CSV -> API）
+
+CSV 需至少包含列：`event_id,label`（可选：`reviewer,note`）
+
+```bash
+# 先做校验（不写入）
+python3 src/scripts/anomaly_v2_import_labels.py \
+  --csv reports/anomaly_v2/topk_review_20260310.csv \
+  --base-url http://localhost:8000 \
+  --dry-run
+
+# 再正式回灌
+python3 src/scripts/anomaly_v2_import_labels.py \
+  --csv reports/anomaly_v2/topk_review_20260310.csv \
+  --base-url http://localhost:8000
+```
 
 ---
 
