@@ -1,0 +1,2 @@
+event_id,dev_num,start_ts,end_ts,peak_score,duration_sec,event_level,decision_reason,shadow_mode,created_at,label,reviewer,note
+000000060160526_1766569475000,000000060160526,1766569475000,1772978189000,0.17744127250122926,6408714,warn,ewma_hysteresis_v2_ongoing,True,2026-03-21T13:26:30,,,

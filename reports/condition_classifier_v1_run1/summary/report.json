@@ -1,0 +1,34 @@
+{
+  "total_windows": 239,
+  "total_files": 8,
+  "class_distribution": {
+    "外部高湿驱动工况": 176,
+    "热源稳定工况": 53,
+    "冷却窗口": 4,
+    "热源启动窗口": 3,
+    "复杂耦合工况": 3
+  },
+  "predicted_group_distribution": {
+    "candidate_high_info": 176,
+    "heat_related": 60,
+    "complex_coupled": 3
+  },
+  "coverage": {
+    "matched_file_count": 8,
+    "input_only_count": 8,
+    "metadata_only_count": 6
+  },
+  "dominant_labels": {
+    "外部高湿驱动工况": 6,
+    "热源稳定工况": 2
+  },
+  "expected_match_ratio_mean": 0.6,
+  "transition_files": [
+    {
+      "file": "2026-03-08 172014_seal_unheated",
+      "dominant_label": "外部高湿驱动工况",
+      "near_transition_windows": 13,
+      "near_transition_transition_label_ratio": 0.0
+    }
+  ]
+}

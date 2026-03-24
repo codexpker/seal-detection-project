@@ -760,6 +760,8 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
             "event": anomaly_v2_payload.get("event"),
             "debug": anomaly_v2_payload.get("debug"),
         }
+    else:
+        event_payload["anomaly_v2"] = None
 
     pending_latest_map[dev_num] = event_payload
 
@@ -2139,6 +2141,45 @@ def get_anomaly_v2_control(dev_num: str = Query("", max_length=50)):
     if dev:
         data["debug_last"] = ANOMALY_V2_LAST_DEBUG_BY_DEV.get(dev)
     return ok(data)
+
+
+@app.get("/api/anomaly/v2/debug/last")
+def anomaly_v2_debug_last(dev_num: str = Query(..., max_length=50)):
+    dev = dev_num.strip()
+    if not dev:
+        return fail(1007, "dev_num is required")
+
+    last_row = query_all(
+        "SELECT device_timestamp, score_raw, score_smooth, feature_json "
+        "FROM anomaly_score_v2 WHERE dev_num=%s ORDER BY device_timestamp DESC LIMIT 1",
+        (dev,),
+    )
+    if not last_row:
+        return ok({"dev_num": dev, "exists": False})
+
+    row = last_row[0]
+    features = row.get("feature_json")
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except Exception:
+            features = {"raw": features}
+
+    return ok(
+        {
+            "dev_num": dev,
+            "exists": True,
+            "runtime_enabled": bool(ANOMALY_V2_RUNTIME.get("enabled", False)),
+            "runtime_config": ANOMALY_V2_RUNTIME,
+            "last_score": {
+                "device_timestamp": row.get("device_timestamp"),
+                "score_raw": row.get("score_raw"),
+                "score_smooth": row.get("score_smooth"),
+                "features": features,
+            },
+            "last_debug": ANOMALY_V2_LAST_DEBUG_BY_DEV.get(dev),
+        }
+    )
 
 
 @app.post("/api/anomaly/v2/control")

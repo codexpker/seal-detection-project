@@ -596,8 +596,121 @@
 2. 并行推进 P0-2：启动每日 Top-K 复核打标。
 3. 达到样本量后执行 P1-3/P1-4：形成首版指标与参数推荐。
 
+### 11.13 最新进度更新（2026-03-21）
+
+> 本轮按“稳步推进MVP主线”执行，优先保障二期链路可评估性，并持续积累人工复核候选样本。
+
+1. **已完成的工程动作**
+   - 完成二期工程化拆分：
+     - `src/anomaly_v2/baseline.py`
+     - `src/anomaly_v2/state_machine.py`
+     - `src/anomaly_v2/pipeline.py`
+   - `backend_app.py` 已改为通过 `pipeline` 执行 v2 主流程。
+   - 新增批量标注导入脚本：
+     - `src/scripts/anomaly_v2_import_labels.py`
+
+2. **已完成的自主联调与压测（端口 8001）**
+   - 执行多设备 recent replay（20~30 设备批量，单设备 120~180 点）。
+   - 最新批次结果：
+     - `anomaly_v2_runs=3582`
+     - `anomaly_v2_events=3546`
+     - 批量回放成功点数：`4500`
+     - 失败设备数：`0`
+   - 已生成批量复核文件：
+     - `reports/anomaly_v2/topk_review_ready_batch.csv`
+     - `reports/anomaly_v2/topk_review_ready_batch_v2.csv`
+     - `reports/anomaly_v2/topk_review_ready_batch_v3.csv`
+   - 已生成回放执行汇总：
+     - `reports/anomaly_v2/replay_summary_v2.csv`
+     - `reports/anomaly_v2/replay_summary_v3.csv`
+
+3. **当前阶段结论（P0）**
+   - 二期链路稳定，可持续运行与回放。
+   - 样本已进入“可持续扩样”阶段，但去重后高价值唯一事件仍偏少（存在“长事件持续更新为同一 event_id”现象）。
+   - 已具备标注回灌与评估闭环能力，后续重点转向“样本量与样本多样性提升”。
+
+4. **下一步执行（保持主线不偏航）**
+   - 持续批量扩样：扩大设备覆盖 + 扩大时间窗 + 分批导出 Top-K。
+   - 每日回灌人工标签，并持续拉取 `eval/summary` 追踪 Precision/Recall/F1。
+   - 当有效复核样本达到阈值（建议先 100+）后，进入参数固化与试点验收。
+
+### 11.14 连续推进进度（2026-03-21，第二轮）
+
+1. **按计划继续自主扩样（端口 8001）**
+   - 新增 50 台设备批量回放（每台 `points=200`）。
+   - 执行结果：
+     - `replayed_devices=50`
+     - `anomaly_v2_runs=7982`
+     - `anomaly_v2_events=7875`
+
+2. **全局 Top-K 样本池扩展**
+   - 查询范围扩大到最近 180 天，`limit=500`。
+   - 当前全局可复核候选：
+     - `global_topk_rows=34`
+     - `unique_global_events=34`
+   - 已输出新增复核文件：
+     - `reports/anomaly_v2/topk_review_ready_global_v4.csv`
+
+3. **主线判断（P0阶段）**
+   - 链路稳定、可持续回放、可持续出分与出事件；
+   - 复核样本已从“个位数”提升至“几十条”，但仍未达到 100+ 目标；
+   - 下一步仍需保持“扩样 + 回灌 + 评估”节奏，优先把样本规模推进到首个阈值。
+
+### 11.15 未实现/未收口事项与推荐（按优先级）
+
+#### P0（建议本周优先完成）
+
+1. **首批人工标注样本未达 100+**
+   - 现状：候选样本池约 34 条，未达到统计稳定阈值。
+   - 推荐：先完成“现有样本全标注 + 每日增量标注”，周内尽量达到 100+。
+
+2. **一期模型服务可用性未恢复**
+   - 现状：v1 侧 `MODEL_SERVICE_URL` 仍非稳定可用。
+   - 推荐：作为独立联调任务推进，避免阻塞 v2 样本与评估主线。
+
+#### P1（P0后立即执行）
+
+3. **首版评估结论未固化到周报模板**
+   - 现状：`eval/summary` 已有，但缺固定输出模板和结论页。
+   - 推荐：固定输出 Precision/Recall/F1、样本量、阈值版本、建议动作。
+
+4. **推荐参数档未最终固化**
+   - 现状：保守/平衡/激进三档可配，但未给出“推荐档 + 适用范围”。
+   - 推荐：基于已标注样本给出 v1 推荐档，并附回滚参数。
+
+5. **试点上线边界未形成文档化结论**
+   - 现状：链路可用，但“可上线设备范围/风险项”尚未正式收口。
+   - 推荐：补一页《试点上线边界》：覆盖范围、风险、回退策略。
+
+### 11.16 自动化收口能力补齐（2026-03-21，第三轮）
+
+1. **新增一键 P0/P1 执行脚本（已落地）**
+   - `src/scripts/anomaly_v2_p0_p1_cycle.py`
+   - 能力：
+     - 可选执行标签回灌（传 `--labels-csv`）
+     - 自动拉取评估与周报相关数据
+     - 自动输出快照与 KPI 文件
+   - 产物：
+     - `reports/anomaly_v2/p1_import_summary_v1.json`（有回灌时）
+     - `reports/anomaly_v2/p1_eval_snapshot_v1.json`
+     - `reports/anomaly_v2/p1_eval_kpi_v1.csv`
+
+2. **新增统一复核任务包（已落地）**
+   - 主样本池：`reports/anomaly_v2/topk_review_master_pending_v1.csv`
+   - 行动批次：`reports/anomaly_v2/topk_review_action_batch_top30_v1.csv`
+   - 任务清单：`reports/anomaly_v2/review_task_manifest_v1.json`
+
+3. **当前快照判断（用于本轮验收）**
+   - 当前实例存在“计数清零/重启后状态”现象，导致 `runs/events/labels` 在新实例中为 0。
+   - 结论：工程链路与自动化脚本已具备，当前瓶颈转为“稳定实例 + 人工标注执行”。
+
+4. **建议执行顺序（不再分散）**
+   - 第一步：标注 `topk_review_action_batch_top30_v1.csv`
+   - 第二步：执行 `anomaly_v2_p0_p1_cycle.py --labels-csv ...`
+   - 第三步：查看 `p1_eval_kpi_v1.csv` 与 `p1_eval_snapshot_v1.json`，形成首版参数建议。
+
 ## 12. 文档版本
 
-- 版本：`v2026.03.09-mvp.11`
-- 状态：二期MVP链路与 Day1~Day7 计划能力已落地；当前进入“P0主线收口（模型服务可用性 + 人工复核样本）”阶段
-- 下一次更新触发条件：完成首批 ≥100 条人工复核并输出首版参数推荐与事件级评估结论
+- 版本：`v2026.03.21-mvp.14`
+- 状态：二期MVP链路、扩样流程、标注回灌与评估自动化已具备；当前进入“执行标注并输出首版P1评估”的收口阶段
+- 下一次更新触发条件：完成 Top30 标注回灌并产出首版 Precision/Recall/F1 与推荐参数档

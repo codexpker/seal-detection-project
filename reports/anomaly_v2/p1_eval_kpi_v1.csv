@@ -1,0 +1,2 @@
+generated_at,label_total,label_true,label_false,label_uncertain,precision,recall,f1,tp,fp,fn,anomaly_v2_runs,anomaly_v2_events,anomaly_v2_shadow_events,process_total,process_model_error
+1774076185003,0,0,0,0,,,,0,0,0,0,0,0,0,0

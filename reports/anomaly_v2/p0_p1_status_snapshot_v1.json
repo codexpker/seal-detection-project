@@ -1,0 +1,123 @@
+{
+  "ts": 1774075785993,
+  "runtime_metrics": {
+    "metrics": {
+      "process_total": 0,
+      "process_ok": 0,
+      "process_insufficient": 0,
+      "process_model_timeout": 0,
+      "process_model_error": 0,
+      "process_model_skipped": 0,
+      "process_skipped_interval": 0,
+      "model_call_total": 0,
+      "model_call_retry": 0,
+      "queue_enqueued": 0,
+      "queue_merged": 0,
+      "queue_processed": 0,
+      "anomaly_v2_runs": 0,
+      "anomaly_v2_events": 0,
+      "anomaly_v2_shadow_events": 0,
+      "anomaly_v2_errors": 0
+    },
+    "queue": {
+      "pending_devices": 0,
+      "device_process_min_interval_ms": 3000
+    },
+    "model_service_url": "http://localhost:9000",
+    "model_call_retries": 2,
+    "model_timeout_seconds": 0.8,
+    "active_model_versions": {
+      "xgboost": "xgboost-2026.02",
+      "gru": "gru-2026.02",
+      "auto": "auto"
+    },
+    "anomaly_v2": {
+      "enabled": false,
+      "shadow_mode": true,
+      "alpha": 0.2,
+      "warn_threshold": 0.72,
+      "recover_threshold": 0.5,
+      "min_points": 5,
+      "event_start_count": 4,
+      "event_end_count": 6,
+      "event_min_duration_sec": 240,
+      "event_cooldown_sec": 900,
+      "sim_enabled": false,
+      "sim_weight": 0.3,
+      "sim_k": 5,
+      "debug_trace": false
+    }
+  },
+  "labels_all": {
+    "label": "all",
+    "limit": 500,
+    "items": []
+  },
+  "eval_summary": {
+    "review_stats": {
+      "total": 0,
+      "true": 0,
+      "false": 0,
+      "uncertain": 0
+    },
+    "confusion_like": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "pred_positive": 0
+    },
+    "metrics": {
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "note": "Evaluation is based on reviewed labels only; uncertain labels are excluded from fp/fn."
+  },
+  "shadow_summary_7d": {
+    "scope": {
+      "start_ts": 1773470985993,
+      "end_ts": 1774075785993
+    },
+    "score_stats": {
+      "count": 11,
+      "avg_raw": 0.4166995078595182,
+      "avg_smooth": 0.30611434167475643,
+      "max_smooth": 0.469018510845246
+    },
+    "event_stats": {
+      "total_events": 4,
+      "shadow_events": 4,
+      "avg_duration_sec": 450989174.25,
+      "max_peak_score": 0.6572116434429172,
+      "level_distribution": {
+        "warn": 4
+      }
+    },
+    "top_devices": [
+      {
+        "dev_num": "000000080165482",
+        "event_count": 1,
+        "peak_score_max": 0.6572116434429172,
+        "duration_avg_sec": 1772227429.0
+      },
+      {
+        "dev_num": "00000000201FFF9",
+        "event_count": 1,
+        "peak_score_max": 0.6548831985905106,
+        "duration_avg_sec": 5562011.0
+      },
+      {
+        "dev_num": "000000050165527",
+        "event_count": 1,
+        "peak_score_max": 0.43247459753770456,
+        "duration_avg_sec": 17833575.0
+      },
+      {
+        "dev_num": "000000080165523",
+        "event_count": 1,
+        "peak_score_max": 0.19483246679497576,
+        "duration_avg_sec": 8333682.0
+      }
+    ]
+  }
+}
