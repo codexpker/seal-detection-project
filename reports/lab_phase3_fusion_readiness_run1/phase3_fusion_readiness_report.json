@@ -1,0 +1,49 @@
+{
+  "inputs": {
+    "baseline_csv": "reports/lab_phase2_xgboost_run3/phase2_baseline_branch_predictions.csv",
+    "similarity_csv": "reports/lab_phase2_similarity_run3/phase2_similarity_run_predictions_best.csv"
+  },
+  "branch_metrics": {
+    "baseline": {
+      "run_balanced_accuracy": 0.6666666666666666,
+      "run_precision": 0.6666666666666666,
+      "run_recall": 0.6666666666666666,
+      "run_f1": 0.6666666666666666
+    },
+    "similarity": {
+      "run_balanced_accuracy": 0.6666666666666666,
+      "run_precision": 0.6666666666666666,
+      "run_recall": 0.6666666666666666,
+      "run_f1": 0.6666666666666666
+    },
+    "or_rule": {
+      "run_balanced_accuracy": 0.6666666666666666,
+      "run_precision": 0.6666666666666666,
+      "run_recall": 0.6666666666666666,
+      "run_f1": 0.6666666666666666
+    },
+    "and_rule": {
+      "run_balanced_accuracy": 0.6666666666666666,
+      "run_precision": 0.6666666666666666,
+      "run_recall": 0.6666666666666666,
+      "run_f1": 0.6666666666666666
+    }
+  },
+  "complementarity": {
+    "both_correct": 4,
+    "baseline_only_correct": 0,
+    "similarity_only_correct": 0,
+    "both_wrong": 2,
+    "prediction_disagreement": 0,
+    "fusion_ready": false
+  },
+  "decision": {
+    "go_to_light_fusion": false,
+    "reason": "Branches currently lack enough complementary errors; keep them as parallel candidates, not a fused primary path."
+  },
+  "outputs": {
+    "detail_csv": "reports/lab_phase3_fusion_readiness_run1/phase3_fusion_readiness_detail.csv",
+    "report_md": "reports/lab_phase3_fusion_readiness_run1/phase3_fusion_readiness_report.md",
+    "report_json": "reports/lab_phase3_fusion_readiness_run1/phase3_fusion_readiness_report.json"
+  }
+}

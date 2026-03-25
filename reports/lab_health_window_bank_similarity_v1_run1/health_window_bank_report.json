@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "health_bank_windows": 21,
+    "health_bank_runs": 3,
+    "scored_windows": 319,
+    "scored_runs": 4,
+    "pending_mean_rank_score": 0.5770970899426613,
+    "non_pending_mean_rank_score": NaN,
+    "run_auc_vs_review_queue": null,
+    "run_auc_vs_nonsealed_or_mixed": 0.0,
+    "top_ranked_runs": [
+      {
+        "run_id": "2026-03-06 160246_seal_unheated",
+        "rank_score": 1.4567421133890766,
+        "final_status": "static_hard_case_watch",
+        "review_status": "pending"
+      },
+      {
+        "run_id": "2026-03-04 163909_unseal_unheated",
+        "rank_score": 0.33761524307635216,
+        "final_status": "static_dynamic_supported_alert",
+        "review_status": "pending"
+      },
+      {
+        "run_id": "2026-03-22 150919_unseal_unheated",
+        "rank_score": 0.2629967061246898,
+        "final_status": "static_dynamic_supported_alert",
+        "review_status": "pending"
+      },
+      {
+        "run_id": "2026-03-03 181049_unseal_unheated",
+        "rank_score": 0.2510342971805265,
+        "final_status": "static_dynamic_support_alert",
+        "review_status": "pending"
+      }
+    ]
+  },
+  "outputs": {
+    "health_bank_csv": "reports/lab_health_window_bank_similarity_v1_run1/health_window_bank.csv",
+    "health_bank_summary_csv": "reports/lab_health_window_bank_similarity_v1_run1/health_window_bank_summary.csv",
+    "window_similarity_csv": "reports/lab_health_window_bank_similarity_v1_run1/window_similarity_ranking.csv",
+    "run_similarity_csv": "reports/lab_health_window_bank_similarity_v1_run1/run_similarity_ranking.csv",
+    "report_md": "reports/lab_health_window_bank_similarity_v1_run1/health_window_bank_report.md",
+    "report_json": "reports/lab_health_window_bank_similarity_v1_run1/health_window_bank_report.json"
+  }
+}

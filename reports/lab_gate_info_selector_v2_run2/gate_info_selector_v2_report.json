@@ -1,0 +1,65 @@
+{
+  "summary": {
+    "route_role_counts": {
+      "transition_context": 119,
+      "reject_heat_related": 93,
+      "static_threshold_favored": 67,
+      "static_memory_candidate": 32,
+      "background_high_hum": 29,
+      "transition_core": 18,
+      "reject_complex_or_unknown": 3
+    },
+    "route_branch_counts": {
+      "transition_branch": 137,
+      "none": 125,
+      "static_threshold_branch": 67,
+      "static_memory_branch": 32
+    },
+    "transition_near_branch_coverage": 1.0,
+    "static_routed_runs": 6,
+    "static_routed_windows": 99,
+    "threshold_favored_ratio": 0.18559556786703602,
+    "downstream_eval": {
+      "baseline_all_static": {
+        "best_feature": "delta_half_dAH",
+        "run_balanced_accuracy": 0.6666666666666666
+      },
+      "threshold_branch": {
+        "covered_runs": 5,
+        "covered_windows": 67,
+        "abstained_runs": 1,
+        "available": true,
+        "best_feature": "slope_in_h_per_h",
+        "run_balanced_accuracy": 0.8333333333333333,
+        "gain_vs_all_static": 0.16666666666666663
+      },
+      "similarity_all_static": {
+        "run_auc": 0.888888888888889,
+        "run_balanced_accuracy": 0.6666666666666666,
+        "run_precision": 0.6666666666666666,
+        "run_recall": 0.6666666666666666,
+        "run_f1": 0.6666666666666666,
+        "run_count": 6
+      },
+      "similarity_memory_only": {
+        "run_auc": 0.7777777777777778,
+        "run_balanced_accuracy": 0.6666666666666666,
+        "run_precision": 1.0,
+        "run_recall": 0.3333333333333333,
+        "run_f1": 0.5,
+        "run_count": 6
+      }
+    },
+    "acceptance": {
+      "transition_routing_pass": true,
+      "threshold_branch_gain_pass": true,
+      "threshold_branch_abstention_required": true
+    }
+  },
+  "outputs": {
+    "window_csv": "reports/lab_gate_info_selector_v2_run2/gate_info_selector_v2_windows.csv",
+    "static_route_csv": "reports/lab_gate_info_selector_v2_run2/gate_info_selector_v2_static_routes.csv",
+    "report_md": "reports/lab_gate_info_selector_v2_run2/gate_info_selector_v2_report.md",
+    "report_json": "reports/lab_gate_info_selector_v2_run2/gate_info_selector_v2_report.json"
+  }
+}

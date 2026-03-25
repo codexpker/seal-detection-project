@@ -1,0 +1,28 @@
+{
+  "summary": {
+    "route_role_counts": {
+      "transition_context": 119,
+      "reject_heat_related": 93,
+      "static_threshold_favored": 67,
+      "static_memory_candidate": 32,
+      "background_high_hum": 29,
+      "transition_core": 18,
+      "reject_complex_or_unknown": 3
+    },
+    "route_branch_counts": {
+      "transition_branch": 137,
+      "none": 125,
+      "static_threshold_branch": 67,
+      "static_memory_branch": 32
+    },
+    "transition_near_branch_coverage": 1.0,
+    "static_routed_runs": 6,
+    "static_routed_windows": 99,
+    "threshold_favored_ratio": 0.18559556786703602
+  },
+  "outputs": {
+    "window_csv": "reports/lab_gate_info_selector_v2_run1/gate_info_selector_v2_windows.csv",
+    "report_md": "reports/lab_gate_info_selector_v2_run1/gate_info_selector_v2_report.md",
+    "report_json": "reports/lab_gate_info_selector_v2_run1/gate_info_selector_v2_report.json"
+  }
+}

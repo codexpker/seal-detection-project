@@ -1,0 +1,4 @@
+﻿condition_family_manual,heat_state_manual,label_coarse,bank_window_count,bank_run_count,mean_info_score,mean_delta_half_dAH
+ext_high_hum_no_heat,off,candidate_high_info,7,1,0.2943522185022807,-0.1154475111197881
+unknown,off,candidate_high_info,9,1,0.2780490232219353,-0.048726064012610246
+unknown,on,exclude_low_info,5,1,0.0,2.1116499321942066

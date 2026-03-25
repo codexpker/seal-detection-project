@@ -1,0 +1,67 @@
+{
+  "config": {
+    "output_dir": "reports/lab_phase2_xgboost_run1",
+    "window_hours": 12,
+    "step_hours": 1,
+    "threshold": 0.5
+  },
+  "dataset": {
+    "candidate_windows": 99,
+    "candidate_runs": 6,
+    "class_counts": {
+      "unseal": 51,
+      "seal": 48
+    }
+  },
+  "baseline": {
+    "best_feature": "delta_half_dAH",
+    "auc": 0.7777777777777778,
+    "direction": "pos",
+    "all": {
+      "slope_in_h_per_h": {
+        "auc": 0.6666666666666666,
+        "direction": "neg"
+      },
+      "delta_half_in_h": {
+        "auc": 0.6666666666666666,
+        "direction": "neg"
+      },
+      "delta_half_dAH": {
+        "auc": 0.7777777777777778,
+        "direction": "pos"
+      },
+      "mean_dT_run": {
+        "auc": 0.6666666666666666,
+        "direction": "pos"
+      }
+    }
+  },
+  "summary": {
+    "window_metrics": {
+      "window_auc": 0.39052287581699346,
+      "window_balanced_accuracy": 0.42830882352941174,
+      "window_precision": 0.463768115942029,
+      "window_recall": 0.6274509803921569,
+      "window_f1": 0.5333333333333333,
+      "window_count": 99
+    },
+    "run_metrics": {
+      "run_auc": 0.4444444444444445,
+      "run_balanced_accuracy": 0.5,
+      "run_precision": 0.5,
+      "run_recall": 0.6666666666666666,
+      "run_f1": 0.5714285714285714,
+      "run_count": 6
+    },
+    "pass": false
+  },
+  "outputs": {
+    "dataset_csv": "reports/lab_phase2_xgboost_run1/phase2_xgboost_dataset.csv",
+    "window_predictions_csv": "reports/lab_phase2_xgboost_run1/phase2_xgboost_window_predictions.csv",
+    "run_predictions_csv": "reports/lab_phase2_xgboost_run1/phase2_xgboost_run_predictions.csv",
+    "fold_metrics_csv": "reports/lab_phase2_xgboost_run1/phase2_xgboost_fold_metrics.csv",
+    "feature_importance_csv": "reports/lab_phase2_xgboost_run1/phase2_xgboost_feature_importance.csv",
+    "report_md": "reports/lab_phase2_xgboost_run1/phase2_xgboost_report.md",
+    "report_json": "reports/lab_phase2_xgboost_run1/phase2_xgboost_report.json"
+  }
+}

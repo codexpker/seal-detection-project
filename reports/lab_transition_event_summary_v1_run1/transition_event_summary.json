@@ -1,0 +1,22 @@
+{
+  "summary": {
+    "verdict": "PASS",
+    "transition_files": 2,
+    "detected_events": 2,
+    "event_detect_rate": 1.0,
+    "near_overlap_rate": 1.0,
+    "peak_in_near_rate": 1.0,
+    "median_duration_h": 32.0,
+    "acceptance": {
+      "all_transition_runs_have_event": true,
+      "all_events_overlap_near_transition": true,
+      "all_peaks_in_near_transition": true
+    }
+  },
+  "outputs": {
+    "event_csv": "reports/lab_transition_event_summary_v1_run1/transition_event_summary.csv",
+    "detail_csv": "reports/lab_transition_event_summary_v1_run1/transition_event_windows.csv",
+    "report_md": "reports/lab_transition_event_summary_v1_run1/transition_event_summary.md",
+    "report_json": "reports/lab_transition_event_summary_v1_run1/transition_event_summary.json"
+  }
+}

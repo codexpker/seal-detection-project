@@ -1,0 +1,134 @@
+{
+  "summary": {
+    "total_rows": 36,
+    "ok_rows": 34,
+    "status_counts": {
+      "ok": 34,
+      "empty_after_preprocess": 2
+    },
+    "subgroup_counts": {
+      "sealed_strict": 19,
+      "unsealed": 8,
+      "sealed_no_screw_grease": 7
+    },
+    "archive_label_mismatch": [
+      {
+        "archive": "sealed.zip",
+        "inner_path_label": "非密封状态数据"
+      },
+      {
+        "archive": "unsealed.zip",
+        "inner_path_label": "密封状态数据/严格密封 或 密封状态数据/没拧螺丝和黄油但没打孔"
+      }
+    ],
+    "subgroup_summary": [
+      {
+        "subgroup": "sealed_no_screw_grease",
+        "duration_h": 13.371944444444445,
+        "mean_out_h": 64.08963377416073,
+        "mean_dT": -0.031824644549763116,
+        "candidate_high_info_ratio": 0.0,
+        "heat_related_ratio": 0.0,
+        "complex_ratio": 0.0,
+        "best_lag_h": 1.5,
+        "best_lag_rh_h": 0.5,
+        "gain_ratio_dAH_change": 0.3910513740714633
+      },
+      {
+        "subgroup": "sealed_strict",
+        "duration_h": 23.6025,
+        "mean_out_h": 44.14655601659751,
+        "mean_dT": -0.23776993648553288,
+        "candidate_high_info_ratio": 0.0,
+        "heat_related_ratio": 0.0,
+        "complex_ratio": 0.0,
+        "best_lag_h": 1.0,
+        "best_lag_rh_h": 5.5,
+        "gain_ratio_dAH_change": 0.643068230091138
+      },
+      {
+        "subgroup": "unsealed",
+        "duration_h": 22.695416666666667,
+        "mean_out_h": 40.898344933802704,
+        "mean_dT": -0.2484268636211291,
+        "candidate_high_info_ratio": 0.6552631578947368,
+        "heat_related_ratio": 0.22556390977443608,
+        "complex_ratio": 0.0,
+        "best_lag_h": 0.0,
+        "best_lag_rh_h": 1.0,
+        "gain_ratio_dAH_change": 0.9826121747141339
+      }
+    ],
+    "confusing_strict_sealed_count": 9,
+    "pair_unsealed_vs_strict_top_features": [
+      {
+        "feature": "best_lag_rh_h",
+        "auc": 0.7916666666666666,
+        "direction": "neg"
+      },
+      {
+        "feature": "candidate_high_info_ratio",
+        "auc": 0.7006578947368421,
+        "direction": "pos"
+      },
+      {
+        "feature": "gain_ratio_dAH_change",
+        "auc": 0.6666666666666666,
+        "direction": "pos"
+      },
+      {
+        "feature": "heat_related_ratio",
+        "auc": 0.6611842105263158,
+        "direction": "pos"
+      },
+      {
+        "feature": "max_corr_dAH_change",
+        "auc": 0.6190476190476191,
+        "direction": "neg"
+      },
+      {
+        "feature": "best_lag_h",
+        "auc": 0.6011904761904762,
+        "direction": "neg"
+      }
+    ],
+    "pair_unsealed_vs_no_screw_top_features": [
+      {
+        "feature": "candidate_high_info_ratio",
+        "auc": 0.8928571428571429,
+        "direction": "pos"
+      },
+      {
+        "feature": "mean_out_h",
+        "auc": 0.8571428571428571,
+        "direction": "neg"
+      },
+      {
+        "feature": "best_lag_h",
+        "auc": 0.8214285714285714,
+        "direction": "neg"
+      },
+      {
+        "feature": "gain_ratio_dAH_change",
+        "auc": 0.7142857142857143,
+        "direction": "pos"
+      },
+      {
+        "feature": "max_corr_outRH_inRH_change",
+        "auc": 0.7142857142857143,
+        "direction": "neg"
+      },
+      {
+        "feature": "heat_related_ratio",
+        "auc": 0.6517857142857143,
+        "direction": "pos"
+      }
+    ]
+  },
+  "outputs": {
+    "run_summary_csv": "reports/old_data_interference_analysis_run1/old_data_run_summary.csv",
+    "confusing_cases_csv": "reports/old_data_interference_analysis_run1/old_data_confusing_strict_sealed.csv",
+    "report_md": "reports/old_data_interference_analysis_run1/old_data_interference_report.md",
+    "report_json": "reports/old_data_interference_analysis_run1/old_data_interference_report.json"
+  }
+}

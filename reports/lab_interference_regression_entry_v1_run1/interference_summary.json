@@ -1,0 +1,33 @@
+{
+  "summary": {
+    "total_ok_runs": 34,
+    "subgroup_counts": {
+      "sealed_strict": 19,
+      "unsealed": 8,
+      "sealed_no_screw_grease": 7
+    },
+    "final_status_counts": {
+      "strict_sealed_negative_control_safe": 11,
+      "strict_sealed_interference_watch": 8,
+      "weak_seal_low_signal": 4,
+      "challenge_positive_like": 4,
+      "weak_seal_watch": 3,
+      "challenge_watch": 3,
+      "challenge_low_signal": 1
+    },
+    "strict_safe_rate": 0.5789473684210527,
+    "strict_watch_rate": 0.42105263157894735,
+    "strict_positive_like_count": 0,
+    "weak_watch_rate": 0.42857142857142855,
+    "unsealed_positive_like_rate": 0.5,
+    "unsealed_watch_or_high_rate": 0.875
+  },
+  "outputs": {
+    "overview_md": "reports/lab_interference_regression_entry_v1_run1/interference_overview.md",
+    "cards_md": "reports/lab_interference_regression_entry_v1_run1/interference_run_cards.md",
+    "regression_csv": "reports/lab_interference_regression_entry_v1_run1/interference_regression_runs.csv",
+    "summary_json": "reports/lab_interference_regression_entry_v1_run1/interference_summary.json",
+    "focus_md": "reports/lab_interference_regression_entry_v1_run1/interference_focus_card.md",
+    "focus_file": "2026-01-04 165808"
+  }
+}

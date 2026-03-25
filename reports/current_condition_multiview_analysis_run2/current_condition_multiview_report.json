@@ -1,0 +1,183 @@
+{
+  "summary": {
+    "total_runs": 15,
+    "group_counts": {
+      "current_heat_related": 5,
+      "current_static_seal": 3,
+      "current_static_unseal": 3,
+      "current_other": 2,
+      "current_transition": 2
+    },
+    "static_runs": 6,
+    "static_class_counts": {
+      "seal": 3,
+      "unseal": 3
+    },
+    "potential_features": [
+      {
+        "category": "dynamic_response",
+        "feature": "corr_out_hum_in_hum",
+        "auc": 1.0,
+        "direction": "pos",
+        "seal_median": 0.738260245049402,
+        "unseal_median": 0.9895938484614762
+      },
+      {
+        "category": "dynamic_response",
+        "feature": "max_corr_outRH_inRH_change",
+        "auc": 0.8888888888888888,
+        "direction": "pos",
+        "seal_median": -0.6796397671673594,
+        "unseal_median": 0.9070084542008683
+      },
+      {
+        "category": "run_physical",
+        "feature": "std_in_hum_run",
+        "auc": 0.8888888888888888,
+        "direction": "neg",
+        "seal_median": 1.0414580006092908,
+        "unseal_median": 0.4691021898685808
+      },
+      {
+        "category": "route_persistence",
+        "feature": "frac_threshold_favored",
+        "auc": 0.7222222222222222,
+        "direction": "pos",
+        "seal_median": 0.2222222222222222,
+        "unseal_median": 0.7741935483870968
+      },
+      {
+        "category": "route_persistence",
+        "feature": "frac_pos_delta_half_dAH",
+        "auc": 0.7222222222222222,
+        "direction": "pos",
+        "seal_median": 0.2222222222222222,
+        "unseal_median": 0.7741935483870968
+      },
+      {
+        "category": "dynamic_response",
+        "feature": "max_corr_dAH_change",
+        "auc": 0.6666666666666666,
+        "direction": "pos",
+        "seal_median": 0.7246604476789771,
+        "unseal_median": 0.9611906964733717
+      },
+      {
+        "category": "window_tail",
+        "feature": "q90_delta_half_in_hum",
+        "auc": 0.6666666666666666,
+        "direction": "neg",
+        "seal_median": 1.3186805555555632,
+        "unseal_median": 0.5238006395466925
+      },
+      {
+        "category": "window_tail",
+        "feature": "q90_delta_half_dAH_w",
+        "auc": 0.6666666666666666,
+        "direction": "pos",
+        "seal_median": 0.0020649141267660384,
+        "unseal_median": 0.09381572998462362
+      }
+    ],
+    "caution_features": [
+      {
+        "category": "run_physical",
+        "feature": "mean_out_h",
+        "auc": 0.7777777777777778,
+        "direction": "pos",
+        "seal_median": 88.45334777471444,
+        "unseal_median": 92.97087045361666
+      },
+      {
+        "category": "route_persistence",
+        "feature": "candidate_high_info_ratio",
+        "auc": 0.6666666666666666,
+        "direction": "neg",
+        "seal_median": 1.0,
+        "unseal_median": 1.0
+      },
+      {
+        "category": "route_persistence",
+        "feature": "heat_related_ratio",
+        "auc": 0.6666666666666666,
+        "direction": "pos",
+        "seal_median": 0.0,
+        "unseal_median": 0.0
+      }
+    ],
+    "hard_case_count": 1,
+    "hard_cases": [
+      {
+        "file": "2026-03-06 160246_seal_unheated",
+        "seal_label": "seal",
+        "nearest_same_file": "2026-03-23 213435_seal_unheated",
+        "nearest_same_distance": 4.4684779698433195,
+        "nearest_other_file": "2026-03-04 163909_unseal_unheated",
+        "nearest_other_distance": 2.0312009840712655,
+        "cross_label_closer": true
+      }
+    ],
+    "transition_top_features": [
+      {
+        "feature": "delta_in_hum",
+        "near_mean": 1.5999999999999999,
+        "non_near_mean": 0.8465546218487395,
+        "diff": 0.7534453781512603
+      },
+      {
+        "feature": "delta_half_in_hum",
+        "near_mean": 0.793335513749775,
+        "non_near_mean": 0.4216029040474599,
+        "diff": 0.37173260970231503
+      },
+      {
+        "feature": "max_hourly_hum_rise",
+        "near_mean": 0.4043735632183917,
+        "non_near_mean": 0.08388058240159654,
+        "diff": 0.3204929808167951
+      },
+      {
+        "feature": "std_out_hum",
+        "near_mean": 0.3970165959737625,
+        "non_near_mean": 0.14519170177962742,
+        "diff": 0.25182489419413506
+      },
+      {
+        "feature": "corr_AH",
+        "near_mean": 0.8216054151417456,
+        "non_near_mean": 0.7435023548219071,
+        "diff": 0.07810306031983849
+      },
+      {
+        "feature": "slope_AH_in",
+        "near_mean": 0.00878312345965881,
+        "non_near_mean": 0.005984207175799577,
+        "diff": 0.0027989162838592324
+      }
+    ],
+    "corr_summary": [
+      {
+        "seal_label": "seal",
+        "corr_in_temp_in_hum": 0.5131179462908775,
+        "corr_in_temp_AH_in": 0.9916551734438591,
+        "corr_out_hum_in_hum": 0.738260245049402,
+        "corr_out_AH_in_AH": 0.8370074289597724
+      },
+      {
+        "seal_label": "unseal",
+        "corr_in_temp_in_hum": -0.951725392071081,
+        "corr_in_temp_AH_in": 0.9429094643511673,
+        "corr_out_hum_in_hum": 0.9895938484614762,
+        "corr_out_AH_in_AH": 0.9057929978875549
+      }
+    ]
+  },
+  "outputs": {
+    "run_table_csv": "reports/current_condition_multiview_analysis_run2/current_multiview_run_table.csv",
+    "static_ranking_csv": "reports/current_condition_multiview_analysis_run2/current_static_feature_ranking.csv",
+    "hard_cases_csv": "reports/current_condition_multiview_analysis_run2/current_static_hard_cases.csv",
+    "transition_lifts_csv": "reports/current_condition_multiview_analysis_run2/current_transition_feature_lifts.csv",
+    "report_md": "reports/current_condition_multiview_analysis_run2/current_condition_multiview_report.md",
+    "report_json": "reports/current_condition_multiview_analysis_run2/current_condition_multiview_report.json"
+  }
+}

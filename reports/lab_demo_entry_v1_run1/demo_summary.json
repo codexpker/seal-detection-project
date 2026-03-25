@@ -1,0 +1,52 @@
+{
+  "summary": {
+    "verdict": "PASS",
+    "review_queue_runs": 6,
+    "final_status_counts": {
+      "gated_background": 5,
+      "gated_heat_related": 3,
+      "transition_boost_alert": 2,
+      "static_dynamic_supported_alert": 2,
+      "static_abstain_low_signal": 1,
+      "static_dynamic_support_alert": 1,
+      "static_hard_case_watch": 1,
+      "static_low_risk": 1
+    },
+    "risk_level_counts": {
+      "abstain": 9,
+      "high": 4,
+      "medium": 1,
+      "watch": 1,
+      "low": 1
+    },
+    "transition_files": 2,
+    "transition_capture_rate": 1.0,
+    "transition_boost_capture_rate": 1.0,
+    "static_eval_run_count": 4,
+    "static_eval_balanced_accuracy": 1.0,
+    "static_candidate_runs": 6,
+    "static_prediction_coverage": 0.6666666666666666,
+    "threshold_abstain_runs": 1,
+    "hard_case_watch_runs": 1,
+    "dynamic_support_runs": 4,
+    "dynamic_support_recovered_runs": 1,
+    "acceptance": {
+      "transition_evidence_captured": true,
+      "transition_boost_attached": true,
+      "threshold_abstain_enabled": true,
+      "hard_case_watch_enabled": true,
+      "dynamic_support_recovers_miss": true,
+      "all_runs_resolved_to_status": true,
+      "static_review_quality_ready": true,
+      "static_coverage_acceptable": true
+    }
+  },
+  "outputs": {
+    "overview_md": "reports/lab_demo_entry_v1_run1/demo_overview.md",
+    "cards_md": "reports/lab_demo_entry_v1_run1/demo_run_cards.md",
+    "decision_csv": "reports/lab_demo_entry_v1_run1/demo_run_decisions.csv",
+    "summary_json": "reports/lab_demo_entry_v1_run1/demo_summary.json",
+    "focus_md": "reports/lab_demo_entry_v1_run1/demo_focus_card.md",
+    "focus_file": "2026-03-04 163909_unseal_unheated"
+  }
+}

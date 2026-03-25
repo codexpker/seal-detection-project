@@ -1,0 +1,7 @@
+﻿file,seal_label,nearest_same_file,nearest_same_distance,nearest_other_file,nearest_other_distance,cross_label_closer
+2026-03-06 160246_seal_unheated,seal,2026-03-23 213435_seal_unheated,4.4684779698433195,2026-03-04 163909_unseal_unheated,2.0312009840712655,True
+2026-03-04 163909_unseal_unheated,unseal,2026-03-22 150919_unseal_unheated,1.7122394073935765,2026-03-06 160246_seal_unheated,2.0312009840712655,False
+2026-03-22 150919_unseal_unheated,unseal,2026-03-04 163909_unseal_unheated,1.7122394073935765,2026-03-06 160246_seal_unheated,3.0451134762323773,False
+2026-03-23 213435_seal_unheated,seal,2026-03-02 161335_seal_unheated,3.4393389134987316,2026-03-22 150919_unseal_unheated,3.452872446063099,False
+2026-03-03 181049_unseal_unheated,unseal,2026-03-04 163909_unseal_unheated,2.970421689952059,2026-03-23 213435_seal_unheated,3.5524271388210584,False
+2026-03-02 161335_seal_unheated,seal,2026-03-23 213435_seal_unheated,3.4393389134987316,2026-03-22 150919_unseal_unheated,3.9835443101741648,False

@@ -1,0 +1,93 @@
+{
+  "config": {
+    "output_dir": "reports/lab_phase2_similarity_run1",
+    "window_hours": 12,
+    "step_hours": 1,
+    "k": 5,
+    "threshold": 0.5
+  },
+  "dataset": {
+    "candidate_windows": 99,
+    "candidate_runs": 6,
+    "top_info_windows": 49,
+    "class_counts": {
+      "unseal": 51,
+      "seal": 48
+    }
+  },
+  "variants": {
+    "all_candidate_windows": {
+      "summary": {
+        "window_metrics": {
+          "window_auc": 0.28615196078431376,
+          "window_balanced_accuracy": 0.3284313725490196,
+          "window_precision": 0.25,
+          "window_recall": 0.1568627450980392,
+          "window_f1": 0.1927710843373494,
+          "window_count": 99
+        },
+        "run_metrics": {
+          "run_auc": 0.11111111111111112,
+          "run_balanced_accuracy": 0.6666666666666666,
+          "run_precision": 0.6666666666666666,
+          "run_recall": 0.6666666666666666,
+          "run_f1": 0.6666666666666666,
+          "run_count": 6
+        },
+        "pass": false
+      }
+    },
+    "top_info_windows": {
+      "summary": {
+        "window_metrics": {
+          "window_auc": 0.18833333333333332,
+          "window_balanced_accuracy": 0.3233333333333333,
+          "window_precision": 0.23529411764705882,
+          "window_recall": 0.16666666666666666,
+          "window_f1": 0.1951219512195122,
+          "window_count": 49
+        },
+        "run_metrics": {
+          "run_auc": 0.22222222222222224,
+          "run_balanced_accuracy": 0.6666666666666666,
+          "run_precision": 1.0,
+          "run_recall": 0.3333333333333333,
+          "run_f1": 0.5,
+          "run_count": 6
+        },
+        "pass": false
+      }
+    }
+  },
+  "best_variant": {
+    "name": "top_info_windows",
+    "summary": {
+      "window_metrics": {
+        "window_auc": 0.18833333333333332,
+        "window_balanced_accuracy": 0.3233333333333333,
+        "window_precision": 0.23529411764705882,
+        "window_recall": 0.16666666666666666,
+        "window_f1": 0.1951219512195122,
+        "window_count": 49
+      },
+      "run_metrics": {
+        "run_auc": 0.22222222222222224,
+        "run_balanced_accuracy": 0.6666666666666666,
+        "run_precision": 1.0,
+        "run_recall": 0.3333333333333333,
+        "run_f1": 0.5,
+        "run_count": 6
+      },
+      "pass": false
+    }
+  },
+  "outputs": {
+    "dataset_all_csv": "reports/lab_phase2_similarity_run1/phase2_similarity_dataset_all.csv",
+    "dataset_top_info_csv": "reports/lab_phase2_similarity_run1/phase2_similarity_dataset_top_info.csv",
+    "window_predictions_all_csv": "reports/lab_phase2_similarity_run1/phase2_similarity_window_predictions_all.csv",
+    "window_predictions_top_info_csv": "reports/lab_phase2_similarity_run1/phase2_similarity_window_predictions_top_info.csv",
+    "run_predictions_best_csv": "reports/lab_phase2_similarity_run1/phase2_similarity_run_predictions_best.csv",
+    "report_md": "reports/lab_phase2_similarity_run1/phase2_similarity_report.md",
+    "report_json": "reports/lab_phase2_similarity_run1/phase2_similarity_report.json"
+  }
+}

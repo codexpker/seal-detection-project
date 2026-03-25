@@ -1,0 +1,41 @@
+{
+  "summary": {
+    "verdict": "PARTIAL_PASS",
+    "review_queue_runs": 5,
+    "final_status_counts": {
+      "gated_background": 5,
+      "gated_heat_related": 3,
+      "static_low_risk": 2,
+      "transition_alert": 2,
+      "static_consensus_alert": 2,
+      "static_abstain_low_signal": 1,
+      "static_disagreement_watch": 1
+    },
+    "risk_level_counts": {
+      "abstain": 9,
+      "high": 4,
+      "low": 2,
+      "watch": 1
+    },
+    "transition_files": 2,
+    "transition_capture_rate": 1.0,
+    "static_eval_run_count": 5,
+    "static_eval_balanced_accuracy": 0.5833333333333333,
+    "threshold_abstain_runs": 1,
+    "acceptance": {
+      "transition_evidence_captured": true,
+      "threshold_abstain_enabled": true,
+      "all_runs_resolved_to_status": true,
+      "static_review_quality_ready": false
+    }
+  },
+  "outputs": {
+    "segment_csv": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_evidence_segments.csv",
+    "transition_csv": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_transition_evidence.csv",
+    "threshold_csv": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_threshold_evidence.csv",
+    "similarity_csv": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_similarity_evidence.csv",
+    "decision_csv": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_run_decisions.csv",
+    "report_md": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_evidence_fuser_report.md",
+    "report_json": "reports/lab_phase3_evidence_fuser_v1_run2/phase3_evidence_fuser_report.json"
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "config": {
+    "output_dir": "reports/lab_phase2_xgboost_run3",
+    "window_hours": 12,
+    "step_hours": 1,
+    "threshold": 0.5
+  },
+  "dataset": {
+    "candidate_windows": 99,
+    "candidate_runs": 6,
+    "class_counts": {
+      "unseal": 51,
+      "seal": 48
+    },
+    "top_info_windows": 49
+  },
+  "baseline": {
+    "best_feature": "delta_half_dAH",
+    "auc": 0.7777777777777778,
+    "direction": "pos",
+    "all": {
+      "slope_in_h_per_h": {
+        "auc": 0.6666666666666666,
+        "direction": "neg"
+      },
+      "delta_half_in_h": {
+        "auc": 0.6666666666666666,
+        "direction": "neg"
+      },
+      "delta_half_dAH": {
+        "auc": 0.7777777777777778,
+        "direction": "pos"
+      },
+      "mean_dT_run": {
+        "auc": 0.6666666666666666,
+        "direction": "pos"
+      }
+    }
+  },
+  "baseline_branch": {
+    "best_feature": "delta_half_dAH",
+    "run_balanced_accuracy": 0.6666666666666666,
+    "run_precision": 0.6666666666666666,
+    "run_recall": 0.6666666666666666,
+    "run_f1": 0.6666666666666666,
+    "pass": true,
+    "all": {
+      "slope_in_h_per_h": {
+        "run_balanced_accuracy": 0.3333333333333333,
+        "run_precision": 0.4,
+        "run_recall": 0.6666666666666666,
+        "run_f1": 0.5
+      },
+      "delta_half_in_h": {
+        "run_balanced_accuracy": 0.3333333333333333,
+        "run_precision": 0.4,
+        "run_recall": 0.6666666666666666,
+        "run_f1": 0.5
+      },
+      "delta_half_dAH": {
+        "run_balanced_accuracy": 0.6666666666666666,
+        "run_precision": 0.6666666666666666,
+        "run_recall": 0.6666666666666666,
+        "run_f1": 0.6666666666666666
+      },
+      "mean_dT_run": {
+        "run_balanced_accuracy": 0.3333333333333333,
+        "run_precision": 0.3333333333333333,
+        "run_recall": 0.3333333333333333,
+        "run_f1": 0.3333333333333333
+      }
+    }
+  },
+  "variants": {
+    "all_candidate_windows": {
+      "summary": {
+        "window_metrics": {
+          "window_auc": 0.39052287581699346,
+          "window_balanced_accuracy": 0.42830882352941174,
+          "window_precision": 0.463768115942029,
+          "window_recall": 0.6274509803921569,
+          "window_f1": 0.5333333333333333,
+          "window_count": 99
+        },
+        "run_metrics": {
+          "run_auc": 0.4444444444444445,
+          "run_balanced_accuracy": 0.5,
+          "run_precision": 0.5,
+          "run_recall": 0.6666666666666666,
+          "run_f1": 0.5714285714285714,
+          "run_count": 6
+        },
+        "pass": false
+      }
+    },
+    "top_info_windows": {
+      "summary": {
+        "window_metrics": {
+          "window_auc": 0.19833333333333336,
+          "window_balanced_accuracy": 0.30666666666666664,
+          "window_precision": 0.3076923076923077,
+          "window_recall": 0.3333333333333333,
+          "window_f1": 0.32,
+          "window_count": 49
+        },
+        "run_metrics": {
+          "run_auc": 0.11111111111111112,
+          "run_balanced_accuracy": 0.3333333333333333,
+          "run_precision": 0.3333333333333333,
+          "run_recall": 0.3333333333333333,
+          "run_f1": 0.3333333333333333,
+          "run_count": 6
+        },
+        "pass": false
+      }
+    }
+  },
+  "best_variant": {
+    "name": "all_candidate_windows",
+    "summary": {
+      "window_metrics": {
+        "window_auc": 0.39052287581699346,
+        "window_balanced_accuracy": 0.42830882352941174,
+        "window_precision": 0.463768115942029,
+        "window_recall": 0.6274509803921569,
+        "window_f1": 0.5333333333333333,
+        "window_count": 99
+      },
+      "run_metrics": {
+        "run_auc": 0.4444444444444445,
+        "run_balanced_accuracy": 0.5,
+        "run_precision": 0.5,
+        "run_recall": 0.6666666666666666,
+        "run_f1": 0.5714285714285714,
+        "run_count": 6
+      },
+      "pass": false
+    }
+  },
+  "outputs": {
+    "dataset_all_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_dataset_all.csv",
+    "dataset_top_info_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_dataset_top_info.csv",
+    "window_predictions_all_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_window_predictions_all.csv",
+    "window_predictions_top_info_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_window_predictions_top_info.csv",
+    "run_predictions_best_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_run_predictions_best.csv",
+    "fold_metrics_all_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_fold_metrics_all.csv",
+    "fold_metrics_top_info_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_fold_metrics_top_info.csv",
+    "feature_importance_all_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_feature_importance_all.csv",
+    "feature_importance_top_info_csv": "reports/lab_phase2_xgboost_run3/phase2_xgboost_feature_importance_top_info.csv",
+    "baseline_branch_predictions_csv": "reports/lab_phase2_xgboost_run3/phase2_baseline_branch_predictions.csv",
+    "report_md": "reports/lab_phase2_xgboost_run3/phase2_xgboost_report.md",
+    "report_json": "reports/lab_phase2_xgboost_run3/phase2_xgboost_report.json"
+  }
+}
