@@ -1,0 +1,26 @@
+{
+  "summary": {
+    "short_window_hours": 2,
+    "main_window_hours": 6,
+    "long_window_hours": 12,
+    "no_heat_status_counts": {
+      "ext_high_hum_no_heat_multiscale_breathing_watch": 1,
+      "ext_high_hum_no_heat_multiscale_negative": 1,
+      "ext_high_hum_no_heat_multiscale_supported": 1
+    },
+    "no_heat_three_state_ready": true,
+    "short_window_overreacts": true,
+    "cooling_status_counts": {
+      "ext_high_hum_cooling_multiscale_no_segment": 2,
+      "ext_high_hum_cooling_multiscale_long_confirmed_candidate": 1
+    },
+    "cooling_long_confirmation_helpful": true,
+    "cooling_validation_ready": false
+  },
+  "outputs": {
+    "no_heat_csv": "reports/lab_ext_high_humidity_response_v2_run1/ext_high_hum_multiscale_no_heat.csv",
+    "cooling_csv": "reports/lab_ext_high_humidity_response_v2_run1/ext_high_hum_multiscale_cooling.csv",
+    "report_md": "reports/lab_ext_high_humidity_response_v2_run1/ext_high_humidity_response_v2_report.md",
+    "report_json": "reports/lab_ext_high_humidity_response_v2_run1/ext_high_humidity_response_v2_report.json"
+  }
+}

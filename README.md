@@ -53,9 +53,12 @@ seal_detection_project/
 ### 1) 安装依赖
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 npm install
 ```
+
+说明：
+- “本地 Excel 上传检测” 依赖 `openpyxl` 解析 `.xlsx` 文件，该依赖已包含在 `requirements.txt` 中。
 
 ### 2) 初始化数据库（首次）
 

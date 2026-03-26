@@ -1,0 +1,69 @@
+{
+  "summary": {
+    "review_rows": 16,
+    "reviewed_rows": 3,
+    "promoted_health_runs": 1,
+    "promoted_health_windows": 32,
+    "anomaly_reference_runs": 2,
+    "updated_health_bank_runs": 4,
+    "updated_health_bank_windows": 53,
+    "reranked_pending_runs": 3,
+    "top_reranked_runs": [
+      {
+        "run_id": "2026-03-03 181049_unseal_unheated",
+        "rank_score": 0.42642052911145056,
+        "final_status": "static_dynamic_support_alert"
+      },
+      {
+        "run_id": "2026-03-04 163909_unseal_unheated",
+        "rank_score": 0.33761524307635216,
+        "final_status": "static_dynamic_supported_alert"
+      },
+      {
+        "run_id": "2026-03-22 150919_unseal_unheated",
+        "rank_score": 0.2629967061246898,
+        "final_status": "static_dynamic_supported_alert"
+      }
+    ],
+    "similarity_summary": {
+      "health_bank_windows": 53,
+      "health_bank_runs": 4,
+      "scored_windows": 52,
+      "scored_runs": 3,
+      "pending_mean_rank_score": 0.34234415943749746,
+      "non_pending_mean_rank_score": NaN,
+      "run_auc_vs_review_queue": null,
+      "run_auc_vs_nonsealed_or_mixed": null,
+      "top_ranked_runs": [
+        {
+          "run_id": "2026-03-03 181049_unseal_unheated",
+          "rank_score": 0.42642052911145056,
+          "final_status": "static_dynamic_support_alert",
+          "review_status": "pending"
+        },
+        {
+          "run_id": "2026-03-04 163909_unseal_unheated",
+          "rank_score": 0.33761524307635216,
+          "final_status": "static_dynamic_supported_alert",
+          "review_status": "pending"
+        },
+        {
+          "run_id": "2026-03-22 150919_unseal_unheated",
+          "rank_score": 0.2629967061246898,
+          "final_status": "static_dynamic_supported_alert",
+          "review_status": "pending"
+        }
+      ]
+    }
+  },
+  "outputs": {
+    "merged_review_csv": "reports/lab_health_bank_feedback_loop_v1_run1/review_feedback_merged.csv",
+    "promoted_health_windows_csv": "reports/lab_health_bank_feedback_loop_v1_run1/promoted_health_windows.csv",
+    "anomaly_reference_runs_csv": "reports/lab_health_bank_feedback_loop_v1_run1/anomaly_reference_runs.csv",
+    "updated_health_bank_csv": "reports/lab_health_bank_feedback_loop_v1_run1/updated_health_window_bank.csv",
+    "reranked_window_csv": "reports/lab_health_bank_feedback_loop_v1_run1/feedback_window_similarity_ranking.csv",
+    "reranked_run_csv": "reports/lab_health_bank_feedback_loop_v1_run1/feedback_run_similarity_ranking.csv",
+    "report_md": "reports/lab_health_bank_feedback_loop_v1_run1/health_bank_feedback_report.md",
+    "report_json": "reports/lab_health_bank_feedback_loop_v1_run1/health_bank_feedback_report.json"
+  }
+}

@@ -1,0 +1,17 @@
+﻿file,final_status_v3,primary_evidence_v3,risk_level_v3,final_status_v4,primary_evidence_v4,risk_level_v4,probe_overlay_action_v4,status_changed,evidence_changed,risk_changed
+2026-03-02 105925,gated_background,gate_only,abstain,gated_background,gate_only,abstain,,False,False,False
+2026-03-02 161335_seal_unheated,static_abstain_low_signal,similarity_branch,abstain,static_abstain_low_signal,similarity_branch,abstain,negative_context_only,False,False,False
+2026-03-03 101220_seal_heated,gated_background,gate_only,abstain,gated_background,gate_only,abstain,,False,False,False
+2026-03-03 181049_unseal_unheated,static_dynamic_support_alert,multiview_support,medium,static_dynamic_supported_alert,multiview_support+no_heat_probe,high,supported_upgrades_dynamic_support,True,True,True
+2026-03-04 120007_seal_unheated,gated_background,gate_only,abstain,gated_background,gate_only,abstain,,False,False,False
+2026-03-04 120007_seal_unheated-2026-03-04 163909_unseal_unheated,transition_boost_alert,transition_branch+multiview,high,transition_boost_alert,transition_branch+multiview,high,,False,False,False
+2026-03-04 163909_unseal_unheated,static_dynamic_supported_alert,threshold+similarity+multiview,high,static_dynamic_supported_alert,threshold+similarity+multiview,high,,False,False,False
+2026-03-06 160246_seal_unheated,static_hard_case_watch,hard_case_multiview,watch,static_hard_case_watch,hard_case_multiview,watch,breathing_watch_context_only,False,False,False
+2026-03-08 172014_seal_unheated,transition_boost_alert,transition_branch+multiview,high,transition_boost_alert,transition_branch+multiview,high,,False,False,False
+2026-03-13 080032_unseal_heated,gated_heat_related,gate_only,abstain,gated_heat_related,gate_only,abstain,,False,False,False
+2026-03-14 174006_unseal_heated,gated_heat_related,gate_only,abstain,gated_heat_related,gate_only,abstain,,False,False,False
+2026-03-17 180258_seal_heated,gated_heat_related,gate_only,abstain,gated_heat_related,gate_only,abstain,,False,False,False
+2026-03-21 170450_unseal_heated,gated_background,gate_only,abstain,gated_background,gate_only,abstain,,False,False,False
+2026-03-22 150919_unseal_unheated,static_dynamic_supported_alert,threshold+similarity+multiview,high,static_dynamic_supported_alert,threshold+similarity+multiview,high,,False,False,False
+2026-03-23 212849_seal_unheated,gated_background,gate_only,abstain,gated_background,gate_only,abstain,,False,False,False
+2026-03-23 213435_seal_unheated,static_low_risk,threshold+similarity,low,static_low_risk,threshold+similarity,low,,False,False,False

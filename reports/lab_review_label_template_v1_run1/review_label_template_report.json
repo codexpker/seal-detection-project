@@ -1,0 +1,16 @@
+{
+  "summary": {
+    "row_count": 6,
+    "include_reviewed": false,
+    "review_priority_counts": {
+      "P1_static_alert": 3,
+      "P0_transition": 2,
+      "P2_hard_case_watch": 1
+    }
+  },
+  "outputs": {
+    "template_csv": "reports/lab_review_label_template_v1_run1/review_labels_template.csv",
+    "report_md": "reports/lab_review_label_template_v1_run1/review_label_template_report.md",
+    "report_json": "reports/lab_review_label_template_v1_run1/review_label_template_report.json"
+  }
+}

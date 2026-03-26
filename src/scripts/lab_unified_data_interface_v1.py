@@ -14,13 +14,15 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from src.anomaly_v2 import condition_classifier_v1 as cc
+from src.scripts.lab_ext_high_humidity_response_v2 import run_multiscale_branch_v2
+from src.scripts.lab_ext_high_humidity_no_heat_probe_v3 import run_no_heat_probe_v3
 from src.scripts.lab_phase1_acceptance import Phase1Config
-from src.scripts.lab_phase3_evidence_fuser_v3 import run_pipeline_v3
+from src.scripts.lab_phase3_evidence_fuser_v4 import run_pipeline_v4
 from src.scripts.lab_transition_event_summary_v1 import build_event_table
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Unified run/window/review export for the lab v3 pipeline")
+    parser = argparse.ArgumentParser(description="Unified run/window/review export for the lab v4 pipeline")
     parser.add_argument("--input-dir", default=Phase1Config.input_dir)
     parser.add_argument("--input-zip", default=Phase1Config.input_zip)
     parser.add_argument("--metadata-xlsx", default=Phase1Config.metadata_xlsx)
@@ -261,6 +263,9 @@ def build_review_output(
     decision_df: pd.DataFrame,
     event_df: pd.DataFrame,
     run_manifest_df: pd.DataFrame,
+    no_heat_v2_df: pd.DataFrame | None = None,
+    cooling_v2_df: pd.DataFrame | None = None,
+    no_heat_probe_v3_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     event_cols = [
         "file",
@@ -288,6 +293,84 @@ def build_review_output(
     if "run_id" not in out.columns:
         out["run_id"] = out["file"]
         out = out.merge(run_manifest_df[run_cols], on="run_id", how="left")
+
+    if no_heat_v2_df is not None and not no_heat_v2_df.empty:
+        no_heat_cols = [
+            "file",
+            "fused_no_heat_status_v2",
+            "fused_no_heat_rationale_v2",
+            "score_2h",
+            "score_6h",
+            "score_12h",
+            "hits_2h",
+            "hits_6h",
+            "hits_12h",
+        ]
+        keep = [c for c in no_heat_cols if c in no_heat_v2_df.columns]
+        out = out.merge(no_heat_v2_df[keep], on="file", how="left")
+
+    if cooling_v2_df is not None and not cooling_v2_df.empty:
+        cooling_cols = [
+            "file",
+            "fused_cooling_status_v2",
+            "fused_cooling_rationale_v2",
+            "count_2h",
+            "count_6h",
+            "count_12h",
+            "q75_12h",
+        ]
+        keep = [c for c in cooling_cols if c in cooling_v2_df.columns]
+        out = out.merge(cooling_v2_df[keep], on="file", how="left")
+
+    if no_heat_probe_v3_df is not None and not no_heat_probe_v3_df.empty:
+        probe_cols = [
+            "file",
+            "probe_status_v3",
+            "probe_rationale_v3",
+            "onset_positive_v3",
+            "late_persistence_v3",
+            "breathing_bias_v3",
+            "early_respond_in_h_pos_ratio",
+            "early_rh_gain_per_out",
+            "late_respond_in_h_pos_ratio",
+            "late_rh_gain_per_out",
+            "late_ah_decay_per_headroom",
+        ]
+        keep = [c for c in probe_cols if c in no_heat_probe_v3_df.columns]
+        merge_cols = ["file"] + [c for c in keep if c != "file" and c not in out.columns]
+        if len(merge_cols) > 1:
+            out = out.merge(no_heat_probe_v3_df[merge_cols], on="file", how="left")
+
+    out["ext_high_hum_v2_context"] = ""
+    if "fused_no_heat_status_v2" in out.columns:
+        no_heat_status = out["fused_no_heat_status_v2"].fillna("")
+        no_heat_reason = out.get("fused_no_heat_rationale_v2", pd.Series("", index=out.index)).fillna("")
+        out.loc[no_heat_status.ne(""), "ext_high_hum_v2_context"] = (
+            "no_heat="
+            + no_heat_status.astype(str)
+            + " | "
+            + no_heat_reason.astype(str)
+        )
+    if "fused_cooling_status_v2" in out.columns:
+        cooling_status = out["fused_cooling_status_v2"].fillna("")
+        cooling_reason = out.get("fused_cooling_rationale_v2", pd.Series("", index=out.index)).fillna("")
+        prefix = np.where(out["ext_high_hum_v2_context"].ne(""), " || ", "")
+        out.loc[cooling_status.ne(""), "ext_high_hum_v2_context"] = (
+            out.loc[cooling_status.ne(""), "ext_high_hum_v2_context"].astype(str)
+            + prefix[cooling_status.ne("")]
+            + "cooling="
+            + cooling_status[cooling_status.ne("")].astype(str)
+            + " | "
+            + cooling_reason[cooling_status.ne("")].astype(str)
+        )
+
+    out["no_heat_probe_v3_context"] = ""
+    if "probe_status_v3" in out.columns:
+        probe_status = out["probe_status_v3"].fillna("")
+        probe_reason = out.get("probe_rationale_v3", pd.Series("", index=out.index)).fillna("")
+        out.loc[probe_status.ne(""), "no_heat_probe_v3_context"] = (
+            probe_status.astype(str) + " | " + probe_reason.astype(str)
+        )
 
     out["review_status"] = np.where(out["needs_review"].fillna(False), "pending", "not_required")
     out["review_priority"] = np.select(
@@ -329,6 +412,32 @@ def build_review_output(
         "peak_smooth_score_v3",
         "peak_rank_pct_v3",
         "event_window_count",
+        "fused_no_heat_status_v2",
+        "fused_no_heat_rationale_v2",
+        "score_2h",
+        "score_6h",
+        "score_12h",
+        "hits_2h",
+        "hits_6h",
+        "hits_12h",
+        "fused_cooling_status_v2",
+        "fused_cooling_rationale_v2",
+        "count_2h",
+        "count_6h",
+        "count_12h",
+        "q75_12h",
+        "ext_high_hum_v2_context",
+        "probe_status_v3",
+        "probe_rationale_v3",
+        "onset_positive_v3",
+        "late_persistence_v3",
+        "breathing_bias_v3",
+        "early_respond_in_h_pos_ratio",
+        "early_rh_gain_per_out",
+        "late_respond_in_h_pos_ratio",
+        "late_rh_gain_per_out",
+        "late_ah_decay_per_headroom",
+        "no_heat_probe_v3_context",
         "notes",
         "reviewer",
         "review_label",
@@ -357,7 +466,9 @@ def write_markdown(path: str, summary: Dict[str, Any], outputs: Dict[str, str]) 
     lines = [
         "# Unified Data Interface v1",
         "",
-        "- 目的：把当前 `evidence_fuser v3` 主路线统一收口为三张正式表，供后续现场迁移、人工复核和历史库建设复用。",
+        "- 目的：把当前 `evidence_fuser v4` 主路线统一收口为三张正式表，供后续现场迁移、人工复核和历史库建设复用。",
+        "- 当前默认主路线：`gate/info selector v3 -> evidence_fuser v4 -> transition event summary`。",
+        "- 本次补充：保守接入 `no_heat probe v3` 到无热源高湿静态支线，同时继续在 `review_output` 中保留 `外部高湿响应分支 v2` 的多尺度解释字段。",
         "",
         f"- run_count：`{summary['run_count']}`",
         f"- window_count：`{summary['window_count']}`",
@@ -386,13 +497,22 @@ def main() -> None:
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
-    result = run_pipeline_v3(args)
+    result = run_pipeline_v4(args)
+    ext_high_hum_v2 = run_multiscale_branch_v2(args)
+    no_heat_probe_v3_df = run_no_heat_probe_v3(args)["probe_df"]
     event_df, _ = build_event_table(result["routed_df"], result["decision_df"], args)
     source_map = collect_source_path_map(args)
 
     run_manifest_df = build_run_manifest(result["file_df"], result["decision_df"], event_df, source_map)
     window_table_df = build_window_table(result["routed_df"], args)
-    review_df = build_review_output(result["decision_df"], event_df, run_manifest_df)
+    review_df = build_review_output(
+        result["decision_df"],
+        event_df,
+        run_manifest_df,
+        no_heat_v2_df=ext_high_hum_v2["no_heat_df"],
+        cooling_v2_df=ext_high_hum_v2["cooling_df"],
+        no_heat_probe_v3_df=no_heat_probe_v3_df,
+    )
     summary = build_summary(run_manifest_df, window_table_df, review_df)
 
     outputs = {

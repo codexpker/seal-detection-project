@@ -11,13 +11,15 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+from src.scripts.lab_ext_high_humidity_response_v2 import run_multiscale_branch_v2
+from src.scripts.lab_ext_high_humidity_no_heat_probe_v3 import run_no_heat_probe_v3
 from src.scripts.lab_phase1_acceptance import Phase1Config
-from src.scripts.lab_phase3_evidence_fuser_v3 import run_pipeline_v3
+from src.scripts.lab_phase3_evidence_fuser_v4 import run_pipeline_v4
 from src.scripts.lab_transition_event_summary_v1 import build_event_table
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Demo-oriented entry for lab evidence fuser v3")
+    parser = argparse.ArgumentParser(description="Demo-oriented entry for lab evidence fuser v4")
     parser.add_argument("--input-dir", default=Phase1Config.input_dir)
     parser.add_argument("--input-zip", default=Phase1Config.input_zip)
     parser.add_argument("--metadata-xlsx", default=Phase1Config.metadata_xlsx)
@@ -31,10 +33,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def collect_demo_outputs(args: argparse.Namespace) -> Dict[str, pd.DataFrame]:
-    outputs = run_pipeline_v3(args)
+    outputs = run_pipeline_v4(args)
     event_df, _ = build_event_table(outputs["routed_df"], outputs["decision_df"], args)
+    ext_high_hum_v2 = run_multiscale_branch_v2(args)
+    no_heat_probe_v3 = run_no_heat_probe_v3(args)
     outputs["event_df"] = event_df
     outputs["summary_df"] = pd.DataFrame([outputs["summary"]])
+    outputs["ext_high_hum_v2_summary_df"] = pd.DataFrame([ext_high_hum_v2["summary"]])
+    outputs["ext_high_hum_no_heat_v2_df"] = ext_high_hum_v2["no_heat_df"]
+    outputs["ext_high_hum_cooling_v2_df"] = ext_high_hum_v2["cooling_df"]
+    outputs["no_heat_probe_v3_summary_df"] = pd.DataFrame([no_heat_probe_v3["summary"]])
+    outputs["no_heat_probe_v3_df"] = no_heat_probe_v3["probe_df"]
     return outputs
 
 
@@ -63,6 +72,9 @@ def build_run_card(
     transition_boost_df: pd.DataFrame,
     multiview_df: pd.DataFrame,
     event_df: pd.DataFrame,
+    no_heat_v2_df: pd.DataFrame,
+    cooling_v2_df: pd.DataFrame,
+    no_heat_probe_v3_df: pd.DataFrame,
 ) -> List[str]:
     row = decision_df.loc[decision_df["file"] == file_name].iloc[0]
     lines = [
@@ -151,6 +163,51 @@ def build_run_card(
                 "",
             ]
         )
+
+    no_heat_v2 = no_heat_v2_df.loc[no_heat_v2_df["file"] == file_name]
+    cooling_v2 = cooling_v2_df.loc[cooling_v2_df["file"] == file_name]
+    if not no_heat_v2.empty or not cooling_v2.empty:
+        lines.extend(["### 外部高湿响应 v2", ""])
+        if not no_heat_v2.empty:
+            n = no_heat_v2.iloc[0]
+            lines.extend(
+                [
+                    f"- no_heat_status_v2: `{n['fused_no_heat_status_v2']}`",
+                    f"- no_heat_rationale_v2: `{n['fused_no_heat_rationale_v2']}`",
+                    f"- no_heat_hits_2h_6h_12h: `{int(n['hits_2h'])}/{int(n['hits_6h'])}/{int(n['hits_12h'])}`",
+                    f"- no_heat_scores_2h_6h_12h: `{_to_float(n['score_2h'])}/{_to_float(n['score_6h'])}/{_to_float(n['score_12h'])}`",
+                ]
+            )
+        if not cooling_v2.empty:
+            c = cooling_v2.iloc[0]
+            lines.extend(
+                [
+                    f"- cooling_status_v2: `{c['fused_cooling_status_v2']}`",
+                    f"- cooling_rationale_v2: `{c['fused_cooling_rationale_v2']}`",
+                    f"- cooling_counts_2h_6h_12h: `{int(c['count_2h'])}/{int(c['count_6h'])}/{int(c['count_12h'])}`",
+                    f"- cooling_q75_dAH_12h: `{_to_float(c['q75_12h'])}`",
+                ]
+            )
+        lines.append("")
+
+    probe_v3 = no_heat_probe_v3_df.loc[no_heat_probe_v3_df["file"] == file_name]
+    if not probe_v3.empty:
+        p = probe_v3.iloc[0]
+        lines.extend(
+            [
+                "### 无热源高湿 Probe v3",
+                "",
+                f"- probe_status_v3: `{p['probe_status_v3']}`",
+                f"- probe_rationale_v3: `{p['probe_rationale_v3']}`",
+                f"- onset_positive_v3: `{bool(p['onset_positive_v3'])}`",
+                f"- late_persistence_v3: `{bool(p['late_persistence_v3'])}`",
+                f"- breathing_bias_v3: `{bool(p['breathing_bias_v3'])}`",
+                f"- early_resp_ratio / early_rh_gain: `{_to_float(p['early_respond_in_h_pos_ratio'])} / {_to_float(p['early_rh_gain_per_out'])}`",
+                f"- late_resp_ratio / late_rh_gain: `{_to_float(p['late_respond_in_h_pos_ratio'])} / {_to_float(p['late_rh_gain_per_out'])}`",
+                f"- late_ah_decay_per_headroom: `{_to_float(p['late_ah_decay_per_headroom'])}`",
+                "",
+            ]
+        )
     return lines
 
 
@@ -160,13 +217,18 @@ def write_overview(
     decision_df: pd.DataFrame,
     transition_boost_df: pd.DataFrame,
     event_df: pd.DataFrame,
+    ext_high_hum_v2_summary: Dict[str, Any],
+    no_heat_v2_df: pd.DataFrame,
+    cooling_v2_df: pd.DataFrame,
+    no_heat_probe_v3_summary: Dict[str, Any],
+    no_heat_probe_v3_df: pd.DataFrame,
 ) -> None:
     lines = [
         "# 现场演示总览",
         "",
         "## 当前主线",
         "",
-        "`分支感知路由 -> 转移段相对打分 -> evidence_fuser v3`",
+        "`分支感知路由 -> 转移段相对打分 -> evidence_fuser v4`",
         "",
         "## 核心结论",
         "",
@@ -176,9 +238,52 @@ def write_overview(
         f"- static_eval_balanced_accuracy: `{summary['static_eval_balanced_accuracy']}`",
         f"- static_prediction_coverage: `{summary['static_prediction_coverage']}`",
         "",
-        "## 建议现场优先展示的样例",
+        "## 外部高湿响应补充证据",
+        "",
+        f"- no_heat_status_counts_v2: `{ext_high_hum_v2_summary.get('no_heat_status_counts', {})}`",
+        f"- no_heat_three_state_ready_v2: `{ext_high_hum_v2_summary.get('no_heat_three_state_ready', False)}`",
+        f"- short_window_overreacts_v2: `{ext_high_hum_v2_summary.get('short_window_overreacts', False)}`",
+        f"- cooling_status_counts_v2: `{ext_high_hum_v2_summary.get('cooling_status_counts', {})}`",
+        f"- cooling_validation_ready_v2: `{ext_high_hum_v2_summary.get('cooling_validation_ready', False)}`",
+        f"- no_heat_probe_v3_status_counts: `{no_heat_probe_v3_summary.get('status_counts', {})}`",
+        f"- no_heat_probe_v3_onset_positive_count: `{no_heat_probe_v3_summary.get('onset_positive_count', 0)}`",
+        f"- no_heat_probe_v3_late_persistence_count: `{no_heat_probe_v3_summary.get('late_persistence_count', 0)}`",
+        "",
+        "### v2 重点样例",
         "",
     ]
+
+    for _, row in no_heat_v2_df.iterrows():
+        lines.append(
+            f"- {row['file']} | no_heat={row['fused_no_heat_status_v2']} | "
+            f"score_2h/6h/12h={_to_float(row['score_2h'])}/{_to_float(row['score_6h'])}/{_to_float(row['score_12h'])} | "
+            f"rationale={row['fused_no_heat_rationale_v2']}"
+        )
+
+    for _, row in cooling_v2_df.loc[
+        cooling_v2_df["fused_cooling_status_v2"].eq("ext_high_hum_cooling_multiscale_long_confirmed_candidate")
+    ].iterrows():
+        lines.append(
+            f"- {row['file']} | cooling={row['fused_cooling_status_v2']} | "
+            f"count_2h/6h/12h={int(row['count_2h'])}/{int(row['count_6h'])}/{int(row['count_12h'])} | "
+            f"q75_12h={_to_float(row['q75_12h'])} | rationale={row['fused_cooling_rationale_v2']}"
+        )
+
+    lines.extend(["", "### no-heat probe v3 样例", ""])
+    for _, row in no_heat_probe_v3_df.iterrows():
+        lines.append(
+            f"- {row['file']} | probe={row['probe_status_v3']} | "
+            f"early_resp={_to_float(row['early_respond_in_h_pos_ratio'])} | late_resp={_to_float(row['late_respond_in_h_pos_ratio'])} | "
+            f"late_ah_decay_per_headroom={_to_float(row['late_ah_decay_per_headroom'])} | rationale={row['probe_rationale_v3']}"
+        )
+
+    lines.extend(
+        [
+            "",
+        "## 建议现场优先展示的样例",
+        "",
+        ]
+    )
 
     transition_demo = decision_df[decision_df["final_status"] == "transition_boost_alert"].copy()
     for _, row in transition_demo.iterrows():
@@ -226,6 +331,9 @@ def write_cards(
     transition_boost_df: pd.DataFrame,
     multiview_df: pd.DataFrame,
     event_df: pd.DataFrame,
+    no_heat_v2_df: pd.DataFrame,
+    cooling_v2_df: pd.DataFrame,
+    no_heat_probe_v3_df: pd.DataFrame,
 ) -> None:
     lines = ["# 现场演示运行卡片", ""]
     card_df = decision_df[
@@ -240,7 +348,19 @@ def write_cards(
         )
     ].copy()
     for _, row in card_df.iterrows():
-        lines.extend(build_run_card(str(row["file"]), decision_df, segments_df, transition_boost_df, multiview_df, event_df))
+        lines.extend(
+            build_run_card(
+                str(row["file"]),
+                decision_df,
+                segments_df,
+                transition_boost_df,
+                multiview_df,
+                event_df,
+                no_heat_v2_df,
+                cooling_v2_df,
+                no_heat_probe_v3_df,
+            )
+        )
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -256,6 +376,11 @@ def main() -> None:
     transition_boost_df = outputs_df["transition_boost_df"]
     multiview_df = outputs_df["multiview_df"]
     event_df = outputs_df["event_df"]
+    ext_high_hum_v2_summary = outputs_df["ext_high_hum_v2_summary_df"].iloc[0].to_dict()
+    no_heat_v2_df = outputs_df["ext_high_hum_no_heat_v2_df"]
+    cooling_v2_df = outputs_df["ext_high_hum_cooling_v2_df"]
+    no_heat_probe_v3_summary = outputs_df["no_heat_probe_v3_summary_df"].iloc[0].to_dict()
+    no_heat_probe_v3_df = outputs_df["no_heat_probe_v3_df"]
 
     output_paths = {
         "overview_md": os.path.join(args.output_dir, "demo_overview.md"),
@@ -264,15 +389,50 @@ def main() -> None:
         "summary_json": os.path.join(args.output_dir, "demo_summary.json"),
     }
 
-    write_overview(output_paths["overview_md"], summary, decision_df, transition_boost_df, event_df)
-    write_cards(output_paths["cards_md"], decision_df, segments_df, transition_boost_df, multiview_df, event_df)
+    write_overview(
+        output_paths["overview_md"],
+        summary,
+        decision_df,
+        transition_boost_df,
+        event_df,
+        ext_high_hum_v2_summary,
+        no_heat_v2_df,
+        cooling_v2_df,
+        no_heat_probe_v3_summary,
+        no_heat_probe_v3_df,
+    )
+    write_cards(
+        output_paths["cards_md"],
+        decision_df,
+        segments_df,
+        transition_boost_df,
+        multiview_df,
+        event_df,
+        no_heat_v2_df,
+        cooling_v2_df,
+        no_heat_probe_v3_df,
+    )
     decision_df.to_csv(output_paths["decision_csv"], index=False, encoding="utf-8-sig")
 
     focus_file = _match_focus_file(decision_df, args.focus_file)
     if focus_file:
         focus_path = os.path.join(args.output_dir, "demo_focus_card.md")
         with open(focus_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(build_run_card(focus_file, decision_df, segments_df, transition_boost_df, multiview_df, event_df)))
+            f.write(
+                "\n".join(
+                    build_run_card(
+                        focus_file,
+                        decision_df,
+                        segments_df,
+                        transition_boost_df,
+                        multiview_df,
+                        event_df,
+                        no_heat_v2_df,
+                        cooling_v2_df,
+                        no_heat_probe_v3_df,
+                    )
+                )
+            )
         output_paths["focus_md"] = focus_path
         output_paths["focus_file"] = focus_file
 

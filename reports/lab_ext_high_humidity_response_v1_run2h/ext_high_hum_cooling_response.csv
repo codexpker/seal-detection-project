@@ -1,0 +1,4 @@
+﻿file,seal_label,expected_family,total_windows,cooling_window_count,cooling_window_ratio,frac_pos_delta_half_dAH,frac_pos_delta_half_in_hum,median_delta_half_dAH,q75_delta_half_dAH,median_delta_in_temp,median_slope_in_temp,dominant_cooling_class_label,final_status,risk_level,primary_evidence,notes,cooling_branch_status
+2026-03-14 174006_unseal_heated,unseal,ext_high_hum_with_heat,69,9,0.13043478260869565,0.3333333333333333,1.0,-0.3223720303707513,0.03654364153140843,-0.25,-0.12507262991883752,热源稳定工况,gated_heat_related,abstain,gate_only,heat-related windows dominate,ext_high_hum_cooling_response_weak
+2026-03-03 101220_seal_heated,seal,ext_high_hum_with_heat,6,0,0.0,,,,,,,,gated_background,abstain,gate_only,no routed evidence branch,ext_high_hum_cooling_no_segment
+2026-03-13 080032_unseal_heated,unseal,ext_high_hum_with_heat,32,0,0.0,,,,,,,,gated_heat_related,abstain,gate_only,heat-related windows dominate,ext_high_hum_cooling_no_segment

@@ -1,0 +1,29 @@
+{
+  "summary": {
+    "no_heat_runs": 3,
+    "no_heat_status_counts": {
+      "ext_high_hum_no_heat_breathing_watch": 1,
+      "ext_high_hum_no_heat_response_supported": 1,
+      "ext_high_hum_no_heat_response_negative": 1
+    },
+    "no_heat_supported_unsealed": 1,
+    "no_heat_negative_sealed": 1,
+    "no_heat_breathing_watch_sealed": 1,
+    "cooling_family_runs": 2,
+    "cooling_status_counts": {
+      "ext_high_hum_cooling_response_candidate": 1,
+      "ext_high_hum_cooling_no_segment": 1
+    },
+    "cooling_runs_with_segments": 1,
+    "cooling_sealed_reference_runs": 0,
+    "cooling_unsealed_reference_runs": 1,
+    "cooling_validation_ready": false
+  },
+  "outputs": {
+    "no_heat_csv": "reports/lab_ext_high_humidity_response_v1_run1/ext_high_hum_no_heat_response.csv",
+    "cooling_window_csv": "reports/lab_ext_high_humidity_response_v1_run1/ext_high_hum_cooling_windows.csv",
+    "cooling_run_csv": "reports/lab_ext_high_humidity_response_v1_run1/ext_high_hum_cooling_response.csv",
+    "report_md": "reports/lab_ext_high_humidity_response_v1_run1/ext_high_humidity_response_report.md",
+    "report_json": "reports/lab_ext_high_humidity_response_v1_run1/ext_high_humidity_response_report.json"
+  }
+}

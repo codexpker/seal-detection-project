@@ -1,0 +1,4 @@
+run_id,review_label,reviewer,review_note
+2026-03-06 160246_seal_unheated,healthy,demo,reviewed as healthy hard-case sealed run
+2026-03-04 120007_seal_unheated-2026-03-04 163909_unseal_unheated,anomaly,demo,reviewed as confirmed transition anomaly
+2026-03-08 172014_seal_unheated,anomaly,demo,reviewed as confirmed transition anomaly

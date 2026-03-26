@@ -149,6 +149,19 @@ export async function triggerProcess(devNum, deviceTimestamp) {
   })
   return res.json()
 }
+
+export async function uploadLocalXlsx(file, modelName = 'seal_v4', devNumHint = '', processMode = 'full') {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('model_name', modelName)
+  form.append('dev_num_hint', devNumHint)
+  form.append('process_mode', processMode)
+  const res = await fetch(`${BASE}/api/upload/xlsx`, {
+    method: 'POST',
+    body: form,
+  })
+  return res.json()
+}
  
 export function createHomeSSE() {
   return new EventSource(`${BASE}/api/home/stream`)

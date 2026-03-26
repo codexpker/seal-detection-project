@@ -1,0 +1,18 @@
+{
+  "summary": {
+    "run_count": 3,
+    "status_counts": {
+      "ext_high_hum_no_heat_probe_breathing_watch": 1,
+      "ext_high_hum_no_heat_probe_negative": 1,
+      "ext_high_hum_no_heat_probe_supported": 1
+    },
+    "onset_positive_count": 2,
+    "late_persistence_count": 1,
+    "breathing_bias_count": 1
+  },
+  "outputs": {
+    "probe_csv": "reports/lab_ext_high_humidity_no_heat_probe_v3_run1/ext_high_hum_no_heat_probe_v3.csv",
+    "report_md": "reports/lab_ext_high_humidity_no_heat_probe_v3_run1/ext_high_hum_no_heat_probe_v3_report.md",
+    "report_json": "reports/lab_ext_high_humidity_no_heat_probe_v3_run1/ext_high_hum_no_heat_probe_v3_report.json"
+  }
+}

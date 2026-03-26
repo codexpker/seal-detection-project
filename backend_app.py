@@ -1,6 +1,8 @@
 import asyncio
+import io
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -8,12 +10,15 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 import httpx
 import mysql.connector
-from fastapi import FastAPI, Path, Query
+import pandas as pd
+from fastapi import FastAPI, File, Form, Path, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
 
+from src.anomaly_v2 import local_model as local_anomaly_model
 from src.anomaly_v2 import pipeline as v2_pipeline
+from src.anomaly_v2 import upload_parser as upload_excel_parser
 
 
 # -----------------------------
@@ -38,6 +43,8 @@ DEFAULT_MODEL_NAME = _env("DEFAULT_MODEL_NAME", "auto")
 BEST_MODEL_NAME = _env("BEST_MODEL_NAME", "gru")
 WINDOW_N = int(_env("WINDOW_N", "120"))
 WINDOW_T_MINUTES = int(_env("WINDOW_T_MINUTES", "10"))
+LOCAL_MODEL_WINDOW_N = int(_env("LOCAL_MODEL_WINDOW_N", "5000"))
+LOCAL_MODEL_WINDOW_T_MINUTES = int(_env("LOCAL_MODEL_WINDOW_T_MINUTES", "720"))
 HOME_MIN_DISPLAY_SECONDS = int(_env("HOME_MIN_DISPLAY_SECONDS", "60"))
 MODEL_TIMEOUT_SECONDS = float(_env("MODEL_TIMEOUT_SECONDS", "0.8"))
 MODEL_CONNECT_TIMEOUT_SECONDS = float(_env("MODEL_CONNECT_TIMEOUT_SECONDS", "0.3"))
@@ -54,6 +61,10 @@ ANOMALY_V2_EVENT_START_COUNT = int(_env("ANOMALY_V2_EVENT_START_COUNT", "4"))
 ANOMALY_V2_EVENT_END_COUNT = int(_env("ANOMALY_V2_EVENT_END_COUNT", "6"))
 ANOMALY_V2_EVENT_MIN_DURATION_SEC = int(_env("ANOMALY_V2_EVENT_MIN_DURATION_SEC", "240"))
 ANOMALY_V2_EVENT_COOLDOWN_SEC = int(_env("ANOMALY_V2_EVENT_COOLDOWN_SEC", "900"))
+LOCAL_MODEL_NAME = local_anomaly_model.LOCAL_MODEL_NAME
+LOCAL_MODEL_VERSION = local_anomaly_model.LOCAL_MODEL_VERSION
+EXTERNAL_MODEL_NAMES = {"xgboost", "gru"}
+ALL_MODEL_NAMES = {"auto", "xgboost", "gru", LOCAL_MODEL_NAME}
 
 
 # -----------------------------
@@ -75,28 +86,123 @@ def fail(code: int, message: str) -> Dict[str, Any]:
     return {"code": code, "message": message, "data": None}
 
 
+STATUS_DISPLAY_MAP: Dict[str, Dict[str, str]] = {
+    "transition_boost_alert": {
+        "status_label": "转移增强告警",
+        "status_short": "转移告警",
+        "risk_level": "high",
+        "tone": "danger",
+    },
+    "static_dynamic_supported_alert": {
+        "status_label": "高湿响应支持告警",
+        "status_short": "高湿支持",
+        "risk_level": "high",
+        "tone": "warning",
+    },
+    "static_dynamic_support_alert": {
+        "status_label": "高湿响应支持告警",
+        "status_short": "高湿支持",
+        "risk_level": "high",
+        "tone": "warning",
+    },
+    "static_hard_case_watch": {
+        "status_label": "难例观察",
+        "status_short": "观察",
+        "risk_level": "watch",
+        "tone": "warning",
+    },
+    "static_abstain_low_signal": {
+        "status_label": "低信号保守通过",
+        "status_short": "低信号",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "heat_related_background": {
+        "status_label": "热相关背景",
+        "status_short": "热相关",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "low_info_background": {
+        "status_label": "低信息背景",
+        "status_short": "低信息",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "insufficient_data": {
+        "status_label": "数据不足",
+        "status_short": "不足",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "insufficient_history_local": {
+        "status_label": "历史窗口不足",
+        "status_short": "窗口不足",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "ongoing": {
+        "status_label": "异常事件",
+        "status_short": "异常",
+        "risk_level": "high",
+        "tone": "danger",
+    },
+    "no_detection": {
+        "status_label": "无检测结果",
+        "status_short": "无检测",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+}
+
+
+def describe_detection_status(status: Optional[str]) -> Dict[str, str]:
+    key = str(status or "").strip() or "unknown"
+    meta = STATUS_DISPLAY_MAP.get(key)
+    if meta:
+        return {"status": key, **meta}
+    fallback_short = key.replace("_", " ")[:16] if key else "未知"
+    return {
+        "status": key,
+        "status_label": key.replace("_", " ") if key else "未知状态",
+        "status_short": fallback_short,
+        "risk_level": "low",
+        "tone": "muted",
+    }
+
+
+def enrich_mark_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    enriched = dict(item)
+    enriched.update(describe_detection_status(item.get("status")))
+    if enriched.get("display_mark_ts") and not enriched.get("first_detected_ts"):
+        enriched["first_detected_ts"] = enriched["display_mark_ts"]
+    if enriched.get("display_mark_ts") and not enriched.get("last_detected_ts"):
+        enriched["last_detected_ts"] = enriched["display_mark_ts"]
+    return enriched
+
+
 # -----------------------------
 # Pydantic models
 # -----------------------------
 
 
 class ModelSelectRequest(BaseModel):
-    model_name: Literal["auto", "xgboost", "gru"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
 
 
 class DeviceModelSelectRequest(BaseModel):
-    model_name: Literal["auto", "xgboost", "gru"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
 
 
 class ReplayRequest(BaseModel):
     dev_num: str
     start_ts: int
     end_ts: int
-    model_name: Literal["auto", "xgboost", "gru"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
 
 
 class ModelRollbackRequest(BaseModel):
-    model_name: Literal["xgboost", "gru", "auto"]
+    model_name: Literal["xgboost", "gru", "auto", "seal_v4"]
     target_version: str
 
 
@@ -171,6 +277,8 @@ event_bus = EventBus()
 home_state = HomeState()
 pending_latest_map: Dict[str, Dict[str, Any]] = {}
 DEFAULT_MODEL = BEST_MODEL_NAME or DEFAULT_MODEL_NAME
+if not MODEL_SERVICE_ENABLED and DEFAULT_MODEL in EXTERNAL_MODEL_NAMES:
+    DEFAULT_MODEL = LOCAL_MODEL_NAME
 RUNTIME_METRICS: Dict[str, int] = {
     "process_total": 0,
     "process_ok": 0,
@@ -198,11 +306,13 @@ QUEUE_WORKER_STARTED = False
 MODEL_VERSION_CATALOG: Dict[str, List[str]] = {
     "xgboost": ["xgboost-2026.01", "xgboost-2026.02"],
     "gru": ["gru-2026.01", "gru-2026.02"],
+    LOCAL_MODEL_NAME: [LOCAL_MODEL_VERSION],
     "auto": ["auto"],
 }
 ACTIVE_MODEL_VERSION: Dict[str, str] = {
     "xgboost": "xgboost-2026.02",
     "gru": "gru-2026.02",
+    LOCAL_MODEL_NAME: LOCAL_MODEL_VERSION,
     "auto": "auto",
 }
 ANOMALY_V2_STATE_BY_DEV: Dict[str, Dict[str, Any]] = {}
@@ -224,16 +334,46 @@ ANOMALY_V2_RUNTIME: Dict[str, Any] = {
     "sim_k": 5,
     "debug_trace": False,
 }
+DB_BOOTSTRAP_OK = False
+DB_BOOTSTRAP_ERROR = ""
 
 
 def get_effective_model_for_device(dev_num: str) -> str:
+    return resolve_effective_model_name(get_requested_model_for_device(dev_num))
+
+
+def normalize_model_name(model_name: Optional[str]) -> str:
+    value = str(model_name or "").strip().lower()
+    if not value:
+        return "auto"
+    return value if value in ALL_MODEL_NAMES else "auto"
+
+
+def get_requested_model_for_device(dev_num: str) -> str:
     rows = query_all(
         "SELECT model_name FROM device_model_preference WHERE dev_num=%s LIMIT 1",
         (dev_num,),
     )
     if rows and rows[0].get("model_name"):
-        return rows[0]["model_name"]
-    return DEFAULT_MODEL
+        return normalize_model_name(rows[0]["model_name"])
+    return normalize_model_name(DEFAULT_MODEL)
+
+
+def resolve_effective_model_name(model_name: Optional[str]) -> str:
+    requested = normalize_model_name(model_name)
+    if requested == "auto":
+        if MODEL_SERVICE_ENABLED and normalize_model_name(BEST_MODEL_NAME) in EXTERNAL_MODEL_NAMES:
+            return normalize_model_name(BEST_MODEL_NAME)
+        return LOCAL_MODEL_NAME
+    if requested in EXTERNAL_MODEL_NAMES:
+        return requested if MODEL_SERVICE_ENABLED else LOCAL_MODEL_NAME
+    if requested == LOCAL_MODEL_NAME:
+        return LOCAL_MODEL_NAME
+    return LOCAL_MODEL_NAME
+
+
+def is_local_model(model_name: Optional[str]) -> bool:
+    return resolve_effective_model_name(model_name) == LOCAL_MODEL_NAME
 
 
 # -----------------------------
@@ -423,6 +563,191 @@ def fetch_window(dev_num: str, end_ts: int, n: int, t_minutes: int = 0) -> List[
         rows = query_all(sql, (dev_num, end_ts, n))
     rows.reverse()
     return rows
+
+
+def fetch_points_for_model(dev_num: str, end_ts: int, model_name: str) -> List[Dict[str, Any]]:
+    effective_model = resolve_effective_model_name(model_name)
+    if effective_model == LOCAL_MODEL_NAME:
+        return fetch_window(dev_num, end_ts, LOCAL_MODEL_WINDOW_N, LOCAL_MODEL_WINDOW_T_MINUTES)
+    return fetch_window(dev_num, end_ts, WINDOW_N, WINDOW_T_MINUTES)
+
+
+def slugify_upload_token(value: str, fallback: str = "upload") -> str:
+    token = re.sub(r"[^0-9a-zA-Z_]+", "_", str(value or "").strip())
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or fallback
+
+
+def build_upload_dev_num(file_name: str, dev_num_hint: str = "") -> str:
+    base = slugify_upload_token(dev_num_hint or os.path.splitext(os.path.basename(file_name))[0], "upload")
+    suffix = str(now_ms())[-8:]
+    prefix = f"upload_{base}"
+    max_prefix_len = max(1, 50 - len(suffix) - 1)
+    prefix = prefix[:max_prefix_len]
+    return f"{prefix}_{suffix}"
+
+
+def load_uploaded_excel_points(file_bytes: bytes) -> pd.DataFrame:
+    excel = pd.ExcelFile(io.BytesIO(file_bytes))
+    last_error: Optional[Exception] = None
+    for sheet_name in excel.sheet_names:
+        try:
+            raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+            df = upload_excel_parser.preprocess_excel_df(raw_df)
+            if not df.empty:
+                return df
+        except Exception as err:
+            last_error = err
+            continue
+    if last_error:
+        raise ValueError(f"无法解析上传的 Excel：{last_error}")
+    raise ValueError("上传文件中未找到可用工作表")
+
+
+def dataframe_to_series(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    series: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        series.append(
+            {
+                "ts": int(pd.Timestamp(row["time"]).value // 1_000_000),
+                "in_temp": float(row["in_temp"]),
+                "out_temp": float(row["out_temp"]),
+                "in_hum": float(row["in_hum"]),
+                "out_hum": float(row["out_hum"]),
+            }
+        )
+    return series
+
+
+async def predict_points_window(
+    dev_num: str,
+    points: List[Dict[str, Any]],
+    requested_model_name: str,
+    device_timestamp: int,
+) -> Dict[str, Any]:
+    effective_model_name = resolve_effective_model_name(requested_model_name)
+    if effective_model_name == LOCAL_MODEL_NAME:
+        return call_local_model(dev_num, points, requested_model_name, device_timestamp)
+    return await call_model_service(dev_num, points, effective_model_name, device_timestamp)
+
+
+def compress_marks_by_hour(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    latest_by_bucket: Dict[int, Dict[str, Any]] = {}
+    for item in items:
+        bucket = int(item["event_hour_bucket"])
+        prev = latest_by_bucket.get(bucket)
+        if prev is None or int(item["display_mark_ts"]) >= int(prev["display_mark_ts"]):
+            latest_by_bucket[bucket] = item
+    return sorted((enrich_mark_payload(x) for x in latest_by_bucket.values()), key=lambda x: int(x["display_mark_ts"]))
+
+
+async def analyze_uploaded_points(
+    *,
+    df: pd.DataFrame,
+    dev_num: str,
+    requested_model_name: str,
+    process_mode: str,
+    file_name: str,
+) -> Dict[str, Any]:
+    series = dataframe_to_series(df)
+    prepared = local_anomaly_model.prepare_points_df(series)
+    resampled = local_anomaly_model.resample_points_df(prepared)
+
+    if process_mode == "latest":
+        scan_timestamps = [int(series[-1]["ts"])]
+    else:
+        scan_timestamps = [int(ts) for ts in resampled["ts"].dropna().astype("int64").tolist()]
+        if not scan_timestamps:
+            scan_timestamps = [int(series[-1]["ts"])]
+
+    detections: List[Dict[str, Any]] = []
+    marks: List[Dict[str, Any]] = []
+    point_idx = 0
+    prefix_points: List[Dict[str, Any]] = []
+    for ts in scan_timestamps:
+        while point_idx < len(series) and int(series[point_idx]["ts"]) <= ts:
+            prefix_points.append(series[point_idx])
+            point_idx += 1
+        if not prefix_points:
+            continue
+
+        result = await predict_points_window(dev_num, prefix_points, requested_model_name, ts)
+        detection_item = {
+            "device_timestamp": ts,
+            "is_anomaly": bool(result.get("is_anomaly", False)),
+            "anomaly_score": float(result.get("anomaly_score", 0.0) or 0.0),
+            "threshold": float(result.get("threshold", 0.0) or 0.0),
+            "model_name": result.get("model_name"),
+            "model_version": result.get("model_version"),
+            "status": result.get("status"),
+            "method": result.get("method", "UPLOAD_SCAN"),
+            "risk_level": ((result.get("local_context") or {}).get("risk_level")),
+            "primary_evidence": ((result.get("local_context") or {}).get("primary_evidence")),
+        }
+        detection_item.update(describe_detection_status(detection_item.get("status")))
+        detections.append(detection_item)
+        if detection_item["is_anomaly"]:
+            marks.append(
+                enrich_mark_payload(
+                {
+                    "dev_num": dev_num,
+                    "display_mark_ts": ts,
+                    "first_detected_ts": ts,
+                    "last_detected_ts": ts,
+                    "event_hour_bucket": hour_bucket(ts),
+                    "status": detection_item["status"] or "ongoing",
+                    "anomaly_score": detection_item["anomaly_score"],
+                    "threshold": detection_item["threshold"],
+                    "risk_level": detection_item.get("risk_level"),
+                    "primary_evidence": detection_item.get("primary_evidence"),
+                }
+                )
+            )
+
+    latest = detections[-1] if detections else {
+        "device_timestamp": int(series[-1]["ts"]),
+        "is_anomaly": False,
+        "anomaly_score": 0.0,
+        "threshold": 0.0,
+        "model_name": resolve_effective_model_name(requested_model_name),
+        "model_version": None,
+        "status": "no_detection",
+        "method": "UPLOAD_SCAN",
+    }
+
+    start_ts = int(series[0]["ts"])
+    end_ts = int(series[-1]["ts"])
+    anomaly_count = sum(1 for item in detections if item["is_anomaly"])
+    detail = {
+        "dev_num": dev_num,
+        "range": {
+            "hours": round((end_ts - start_ts) / 3_600_000, 3),
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "latest_ts": end_ts,
+            "anchor_ts": end_ts,
+            "points_limit": None,
+            "source": "upload_xlsx",
+            "file_name": file_name,
+            "scan_points": len(scan_timestamps),
+        },
+        "series": series,
+        "marks": compress_marks_by_hour(marks),
+        "latest_detection": latest,
+    }
+    return {
+        "dev_num": dev_num,
+        "detail": detail,
+        "latest_detection": latest,
+        "summary": {
+            "row_count": int(len(series)),
+            "scan_count": int(len(detections)),
+            "anomaly_count": int(anomaly_count),
+            "mark_count": int(len(detail["marks"])),
+            "file_name": file_name,
+            "process_mode": process_mode,
+        },
+    }
  
  
 def fetch_device_latest(dev_num: str, limit: int = 500) -> List[Dict[str, Any]]:
@@ -485,6 +810,17 @@ async def call_model_service(dev_num: str, points: List[Dict[str, Any]], model_n
     raise RuntimeError("model service call failed")
 
 
+def call_local_model(dev_num: str, points: List[Dict[str, Any]], requested_model_name: str, device_timestamp: int) -> Dict[str, Any]:
+    result = local_anomaly_model.run_local_detection(
+        dev_num=dev_num,
+        device_timestamp=device_timestamp,
+        points=points,
+        requested_model_name=requested_model_name,
+    )
+    result["request_id"] = str(uuid.uuid4())
+    return result
+
+
 def save_detection_log(dev_num: str, device_timestamp: int, points: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
     if points:
         w_start, w_end = points[0]["ts"], points[-1]["ts"]
@@ -543,6 +879,7 @@ def latest_detection(dev_num: str) -> Optional[Dict[str, Any]]:
         return None
     item = rows[0]
     item["is_anomaly"] = bool(item["is_anomaly"])
+    item.update(describe_detection_status(item.get("status")))
     return item
 
 
@@ -552,20 +889,28 @@ def get_device_model_info(dev_num: str) -> Dict[str, str]:
         (dev_num,),
     )
     if rows and rows[0].get("model_name"):
-        return {"model_name": str(rows[0]["model_name"]), "source": "device"}
-    return {"model_name": DEFAULT_MODEL, "source": "default"}
+        requested = normalize_model_name(rows[0]["model_name"])
+        source = "device"
+    else:
+        requested = normalize_model_name(DEFAULT_MODEL)
+        source = "default"
+    effective = resolve_effective_model_name(requested)
+    if effective != requested:
+        source = f"{source}_fallback_local"
+    return {"model_name": requested, "effective_model_name": effective, "source": source}
 
 
 def get_device_model(dev_num: str) -> str:
-    return get_device_model_info(dev_num)["model_name"]
+    return get_device_model_info(dev_num)["effective_model_name"]
 
 
 def set_device_model(dev_num: str, model_name: str) -> None:
+    normalized = normalize_model_name(model_name)
     execute(
         "INSERT INTO device_model_preference (dev_num, model_name, updated_at) "
         "VALUES (%s,%s,%s) "
         "ON DUPLICATE KEY UPDATE model_name=VALUES(model_name), updated_at=VALUES(updated_at)",
-        (dev_num, model_name, now_ms()),
+        (dev_num, normalized, now_ms()),
     )
 
 
@@ -654,10 +999,15 @@ async def process_queue_worker() -> None:
             continue
 
 
-async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict[str, Any]:
+async def process_latest_for_device(
+    dev_num: str,
+    device_timestamp: int,
+    model_name_override: Optional[str] = None,
+) -> Dict[str, Any]:
     RUNTIME_METRICS["process_total"] += 1
-    points = fetch_window(dev_num, device_timestamp, WINDOW_N, WINDOW_T_MINUTES)
-    model_name = get_device_model(dev_num)
+    requested_model_name = normalize_model_name(model_name_override or get_device_model_info(dev_num)["model_name"])
+    model_name = resolve_effective_model_name(requested_model_name)
+    points = fetch_points_for_model(dev_num, device_timestamp, requested_model_name)
 
     if len(points) < 1:
         result = {
@@ -665,53 +1015,58 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
             "is_anomaly": False,
             "anomaly_score": 0.0,
             "threshold": 0.0,
-            "model_name": model_name,
+            "model_name": LOCAL_MODEL_NAME if is_local_model(requested_model_name) else model_name,
             "model_version": None,
             "infer_latency_ms": 0,
             "status": "insufficient_data",
+            "requested_model_name": requested_model_name,
+            "method": "LOCAL_SEAL_V4" if is_local_model(requested_model_name) else "N_AND_T",
         }
         RUNTIME_METRICS["process_insufficient"] += 1
     else:
-        if not MODEL_SERVICE_ENABLED:
-            result = {
-                "request_id": str(uuid.uuid4()),
-                "is_anomaly": False,
-                "anomaly_score": 0.0,
-                "threshold": 0.0,
-                "model_name": model_name,
-                "model_version": None,
-                "infer_latency_ms": 0,
-                "status": "model_skipped",
-            }
-            RUNTIME_METRICS["process_model_skipped"] += 1
+        if is_local_model(requested_model_name):
+            result = call_local_model(dev_num, points, requested_model_name, device_timestamp)
+            RUNTIME_METRICS["process_ok"] += 1
         else:
             try:
                 result = await call_model_service(dev_num, points, model_name, device_timestamp)
                 RUNTIME_METRICS["process_ok"] += 1
             except httpx.TimeoutException:
-                result = {
-                    "request_id": str(uuid.uuid4()),
-                    "is_anomaly": False,
-                    "anomaly_score": 0.0,
-                    "threshold": 0.0,
-                    "model_name": model_name,
-                    "model_version": None,
-                    "infer_latency_ms": int(MODEL_TIMEOUT_SECONDS * 1000),
-                    "status": "model_timeout",
-                }
-                RUNTIME_METRICS["process_model_timeout"] += 1
+                if not MODEL_SERVICE_ENABLED:
+                    result = call_local_model(dev_num, points, requested_model_name, device_timestamp)
+                    RUNTIME_METRICS["process_model_skipped"] += 1
+                else:
+                    result = {
+                        "request_id": str(uuid.uuid4()),
+                        "is_anomaly": False,
+                        "anomaly_score": 0.0,
+                        "threshold": 0.0,
+                        "model_name": model_name,
+                        "model_version": None,
+                        "infer_latency_ms": int(MODEL_TIMEOUT_SECONDS * 1000),
+                        "status": "model_timeout",
+                        "requested_model_name": requested_model_name,
+                        "method": "N_AND_T",
+                    }
+                    RUNTIME_METRICS["process_model_timeout"] += 1
             except Exception:
-                result = {
-                    "request_id": str(uuid.uuid4()),
-                    "is_anomaly": False,
-                    "anomaly_score": 0.0,
-                    "threshold": 0.0,
-                    "model_name": model_name,
-                    "model_version": None,
-                    "infer_latency_ms": 0,
-                    "status": "model_error",
-                }
-                RUNTIME_METRICS["process_model_error"] += 1
+                if not MODEL_SERVICE_ENABLED:
+                    result = call_local_model(dev_num, points, requested_model_name, device_timestamp)
+                    RUNTIME_METRICS["process_model_skipped"] += 1
+                else:
+                    result = {
+                        "request_id": str(uuid.uuid4()),
+                        "is_anomaly": False,
+                        "anomaly_score": 0.0,
+                        "threshold": 0.0,
+                        "model_name": model_name,
+                        "model_version": None,
+                        "infer_latency_ms": 0,
+                        "status": "model_error",
+                        "requested_model_name": requested_model_name,
+                        "method": "N_AND_T",
+                    }
+                    RUNTIME_METRICS["process_model_error"] += 1
 
     save_detection_log(dev_num, device_timestamp, points, result)
 
@@ -729,7 +1084,7 @@ async def process_latest_for_device(dev_num: str, device_timestamp: int) -> Dict
             "end_ts": points[-1]["ts"] if points else device_timestamp,
             "size": len(points),
         },
-        "method": "N_AND_T",
+        "method": result.get("method", "N_AND_T"),
         "point": latest_point,
         "anomaly_points": [latest_point],
         "detection": result,
@@ -913,12 +1268,18 @@ def run_anomaly_v2(dev_num: str, device_timestamp: int, points: List[Dict[str, A
 
 
 app = FastAPI(title="Seal Detection Backend API", version="1.0.0")
-bootstrap_schema()
 
 
 @app.on_event("startup")
 async def startup_worker() -> None:
-    global QUEUE_WORKER_STARTED
+    global QUEUE_WORKER_STARTED, DB_BOOTSTRAP_OK, DB_BOOTSTRAP_ERROR
+    try:
+        bootstrap_schema()
+        DB_BOOTSTRAP_OK = True
+        DB_BOOTSTRAP_ERROR = ""
+    except Exception as err:
+        DB_BOOTSTRAP_OK = False
+        DB_BOOTSTRAP_ERROR = str(err)
     if not QUEUE_WORKER_STARTED:
         asyncio.create_task(process_queue_worker())
         QUEUE_WORKER_STARTED = True
@@ -926,7 +1287,11 @@ async def startup_worker() -> None:
 
 @app.get("/api/health")
 def health():
-    return ok({"status": "up"})
+    return ok({
+        "status": "up",
+        "db_bootstrap_ok": DB_BOOTSTRAP_OK,
+        "db_bootstrap_error": DB_BOOTSTRAP_ERROR,
+    })
 
 
 @app.get("/api/home/current")
@@ -952,10 +1317,11 @@ def home_current():
 
     points = fetch_device_latest(dev_num, WINDOW_N)
     marks = query_all(
-        "SELECT dev_num, display_mark_ts, event_hour_bucket, status FROM anomaly_event "
+        "SELECT dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status FROM anomaly_event "
         "WHERE dev_num=%s ORDER BY display_mark_ts DESC LIMIT 100",
         (dev_num,),
     )
+    marks = [enrich_mark_payload(item) for item in marks]
     detection = latest_detection(dev_num)
     current_ts = now_ms()
     remain = max(0, HOME_MIN_DISPLAY_SECONDS - int((current_ts - home_state.current_since_ts) / 1000))
@@ -1057,10 +1423,11 @@ def device_curve(
             return fail(1002, f"no data for dev_num={dev_num}")
 
     marks = query_all(
-        "SELECT dev_num, display_mark_ts, event_hour_bucket, status FROM anomaly_event "
+        "SELECT dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status FROM anomaly_event "
         "WHERE dev_num=%s AND display_mark_ts BETWEEN %s AND %s ORDER BY display_mark_ts",
         (dev_num, start_ts, end_range_ts),
     )
+    marks = [enrich_mark_payload(item) for item in marks]
     return ok(
         {
             "dev_num": dev_num,
@@ -1102,6 +1469,7 @@ def device_anomalies(
         "ORDER BY display_mark_ts DESC LIMIT %s OFFSET %s",
         (dev_num, start_ts, end_ts, page_size, offset),
     )
+    items = [enrich_mark_payload(item) for item in items]
     return ok({"dev_num": dev_num, "page": page, "page_size": page_size, "total": total, "items": items})
 
 
@@ -1340,7 +1708,8 @@ def _run_replay_task(task_id: str, req: ReplayRequest) -> None:
         for idx, row in enumerate(rows, start=1):
             device_ts = int(row["device_timestamp"])
             try:
-                asyncio.run(process_latest_for_device(req.dev_num, device_ts))
+                override = normalize_model_name(req.model_name)
+                asyncio.run(process_latest_for_device(req.dev_num, device_ts, model_name_override=override))
                 REPLAY_TASKS[task_id]["processed"] = idx
             except Exception as err:
                 REPLAY_TASKS[task_id]["failed"] += 1
@@ -2258,7 +2627,15 @@ def models():
         {
             "default_model": DEFAULT_MODEL,
             "model_service_enabled": MODEL_SERVICE_ENABLED,
+            "local_model_name": LOCAL_MODEL_NAME,
             "models": [
+                {
+                    "model_name": LOCAL_MODEL_NAME,
+                    "enabled": True,
+                    "latest_version": LOCAL_MODEL_VERSION,
+                    "active_version": ACTIVE_MODEL_VERSION[LOCAL_MODEL_NAME],
+                    "versions": MODEL_VERSION_CATALOG[LOCAL_MODEL_NAME],
+                },
                 {
                     "model_name": "xgboost",
                     "enabled": MODEL_SERVICE_ENABLED,
@@ -2275,7 +2652,7 @@ def models():
                 },
                 {
                     "model_name": "auto",
-                    "enabled": MODEL_SERVICE_ENABLED,
+                    "enabled": True,
                     "latest_version": "auto",
                     "active_version": ACTIVE_MODEL_VERSION["auto"],
                     "versions": MODEL_VERSION_CATALOG["auto"],
@@ -2288,12 +2665,17 @@ def models():
 @app.post("/api/models/select")
 def model_select(req: ModelSelectRequest):
     global DEFAULT_MODEL
-    DEFAULT_MODEL = req.model_name
-    return ok({"default_model": DEFAULT_MODEL, "updated_at": now_ms()})
+    requested = normalize_model_name(req.model_name)
+    if requested in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
+        return fail(1004, "model service disabled for external models")
+    DEFAULT_MODEL = requested
+    return ok({"default_model": DEFAULT_MODEL, "effective_model_name": resolve_effective_model_name(DEFAULT_MODEL), "updated_at": now_ms()})
 
 
 @app.post("/api/models/rollback")
 def model_rollback(req: ModelRollbackRequest):
+    if req.model_name == LOCAL_MODEL_NAME:
+        return fail(1003, "local model does not support rollback")
     versions = MODEL_VERSION_CATALOG.get(req.model_name, [])
     if req.target_version not in versions:
         return fail(1003, f"unsupported target_version={req.target_version}")
@@ -2372,10 +2754,20 @@ def get_device_model_api(dev_num: str = Path(...)):
 
 @app.post("/api/device/{dev_num}/model/select")
 def select_device_model(dev_num: str = Path(...), req: DeviceModelSelectRequest = ...):
-    if not MODEL_SERVICE_ENABLED:
-        return fail(1004, "model service disabled")
-    set_device_model(dev_num, req.model_name)
-    return ok({"dev_num": dev_num, "model_name": req.model_name, "updated_at": now_ms()})
+    requested = normalize_model_name(req.model_name)
+    if requested not in ALL_MODEL_NAMES:
+        return fail(1003, f"unsupported model_name={req.model_name}")
+    if requested in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
+        return fail(1004, "model service disabled for external models")
+    set_device_model(dev_num, requested)
+    return ok(
+        {
+            "dev_num": dev_num,
+            "model_name": requested,
+            "effective_model_name": resolve_effective_model_name(requested),
+            "updated_at": now_ms(),
+        }
+    )
 
 
 @app.post("/api/internal/process/{dev_num}/{device_timestamp}")
@@ -2407,6 +2799,54 @@ async def internal_process(
     payload["effective_device_timestamp"] = effective_ts
     payload["latest_ts"] = latest_ts
     return ok(payload)
+
+
+@app.post("/api/upload/xlsx")
+async def upload_local_xlsx(
+    file: UploadFile = File(...),
+    model_name: str = Form("seal_v4"),
+    dev_num_hint: str = Form(""),
+    process_mode: str = Form("full"),
+):
+    normalized_model = normalize_model_name(model_name)
+    if normalized_model not in ALL_MODEL_NAMES:
+        return fail(1003, f"unsupported model_name={model_name}")
+    if normalized_model in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
+        return fail(1004, "model service disabled for external models")
+    if process_mode not in {"full", "latest"}:
+        return fail(1005, "process_mode must be full or latest")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        return fail(1002, "empty upload file")
+
+    try:
+        df = load_uploaded_excel_points(file_bytes)
+    except Exception as err:
+        return fail(1002, str(err))
+
+    upload_dev_num = build_upload_dev_num(file.filename or "upload.xlsx", dev_num_hint)
+    try:
+        analysis = await analyze_uploaded_points(
+            df=df,
+            dev_num=upload_dev_num,
+            requested_model_name=normalized_model,
+            process_mode=process_mode,
+            file_name=file.filename or "upload.xlsx",
+        )
+    except Exception as err:
+        return fail(1002, f"upload analysis failed: {err}")
+
+    return ok(
+        {
+            **analysis,
+            "model_name": normalized_model,
+            "effective_model_name": resolve_effective_model_name(normalized_model),
+            "process_mode": process_mode,
+            "file_name": file.filename,
+            "source": "upload_xlsx_memory",
+        }
+    )
 
 
 @app.get("/api/runtime/metrics")

@@ -135,8 +135,8 @@
           </div>
           <div v-if="deviceQueryMessage" class="status-label" style="color:var(--color-warning);margin-top:-8px;margin-bottom:12px;">{{ deviceQueryMessage }}</div>
 
-          <div v-if="!modelServiceAvailable || deviceSelectedModel === 'none'" class="status-label" style="color:var(--color-warning);margin-bottom:10px;">
-            {{ !modelServiceAvailable ? (modelServiceMessage || '当前未提供 xgboost/gru 模型，模型切换已禁用，仅支持 none 查询模式') : '当前为 none 模式：仅查询数据，不切换模型' }}
+          <div v-if="modelServiceMessage || deviceSelectedModel === 'none'" class="status-label" style="color:var(--color-warning);margin-bottom:10px;">
+            {{ deviceSelectedModel === 'none' ? '当前为 none 模式：仅查询数据，不切换模型' : modelServiceMessage }}
           </div>
 
           <div class="device-input-row" style="margin-bottom:0">
@@ -155,7 +155,7 @@
                 </option>
               </select>
             </div>
-            <button class="btn-primary cursor-pointer" @click="saveDeviceModel" :disabled="switchingDeviceModel || !queryDev.trim() || !modelServiceAvailable || deviceSelectedModel === 'none'">
+            <button class="btn-primary cursor-pointer" @click="saveDeviceModel" :disabled="switchingDeviceModel || !queryDev.trim() || deviceSelectedModel === 'none' || !selectedDeviceModelEnabled">
               {{ switchingDeviceModel ? '保存中...' : '保存设备模型' }}
             </button>
             <span class="status-label" style="align-self:flex-end;padding-bottom:10px;">当前来源：{{ deviceModelSource }}</span>
@@ -166,7 +166,7 @@
             <div class="form-group">
               <label>模型回滚（版本）</label>
               <select class="model-select" v-model="rollbackModelName">
-                <option v-for="m in modelCatalog.filter((x) => x.model_name !== 'auto')" :key="m.model_name" :value="m.model_name">{{ m.model_name }}</option>
+                <option v-for="m in rollbackModelCatalog" :key="m.model_name" :value="m.model_name">{{ m.model_name }}</option>
               </select>
             </div>
             <div class="form-group">
@@ -175,7 +175,7 @@
                 <option v-for="v in rollbackVersions" :key="v" :value="v">{{ v }}</option>
               </select>
             </div>
-            <button class="btn-primary cursor-pointer" @click="doRollbackModel" :disabled="!rollbackTargetVersion || !modelServiceAvailable">执行回滚</button>
+            <button class="btn-primary cursor-pointer" @click="doRollbackModel" :disabled="!rollbackTargetVersion || !rollbackModelCatalog.length">执行回滚</button>
           </div>
         </div>
 
@@ -183,8 +183,52 @@
           <div class="status-bar">
             <div class="status-item"><span class="status-label">设备</span><span class="status-value">{{ deviceData.dev_num }}</span></div>
             <div class="status-item"><span class="status-label">数据点</span><span class="status-value">{{ deviceData.series.length }}</span></div>
+            <div class="status-item">
+              <span class="status-label">数据来源</span>
+              <span class="status-value">
+                <span v-if="deviceData?.range?.source === 'upload_xlsx'" class="badge badge-warning">实验室调试模式</span>
+                <span v-else class="badge badge-muted">数据库查询</span>
+              </span>
+            </div>
+            <div v-if="deviceData?.range?.file_name" class="status-item">
+              <span class="status-label">文件</span>
+              <span class="status-value">{{ deviceData.range.file_name }}</span>
+            </div>
+            <div v-if="deviceData?.range?.scan_points" class="status-item">
+              <span class="status-label">扫描窗口</span>
+              <span class="status-value">{{ deviceData.range.scan_points }}</span>
+            </div>
+            <div v-if="deviceData?.marks?.length" class="status-item">
+              <span class="status-label">图中标记</span>
+              <span class="status-value">{{ deviceData.marks.length }}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">最新检测</span>
+              <span class="status-value">
+                <span
+                  v-if="deviceData?.latest_detection"
+                  :class="['badge', deviceData.latest_detection.is_anomaly ? 'badge-anomaly' : 'badge-ok']"
+                >
+                  {{ deviceData.latest_detection.is_anomaly ? '异常' : '正常' }}
+                </span>
+                <span v-else class="badge badge-muted">--</span>
+              </span>
+            </div>
+            <div v-if="deviceData?.latest_detection?.status_label" class="status-item">
+              <span class="status-label">最新状态</span>
+              <span class="status-value">{{ deviceData.latest_detection.status_label }}</span>
+            </div>
           </div>
           <TrendChart :series="deviceData.series" :marks="deviceData.marks" :show-zoom="true" />
+          <div v-if="deviceMarkPreview.length" class="mark-chip-panel">
+            <div class="status-label">图中标记摘要（最近 {{ deviceMarkPreview.length }} 条）</div>
+            <div class="mark-chip-list">
+              <div v-for="item in deviceMarkPreview" :key="`${item.display_mark_ts}_${item.status}`" class="mark-chip">
+                <span :class="['badge', badgeClassByTone(item)]">{{ item.status_short || item.status_label || item.status || '标记' }}</span>
+                <span class="mark-chip-time">{{ formatTime(item.display_mark_ts) }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -308,6 +352,7 @@
               <label>模型</label>
               <select class="model-select" v-model="replayModelName">
                 <option value="auto">auto</option>
+                <option value="seal_v4">seal_v4</option>
                 <option value="xgboost">xgboost</option>
                 <option value="gru">gru</option>
               </select>
@@ -317,6 +362,41 @@
           </div>
           <div v-if="replayTaskId" class="json-box">任务ID: {{ replayTaskId }}</div>
           <div v-if="replayTaskStatus" class="json-box">{{ JSON.stringify(replayTaskStatus, null, 2) }}</div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">本地 Excel 上传检测</h3>
+          <div class="device-input-row">
+            <div class="form-group">
+              <label>Excel 文件</label>
+              <input class="input" type="file" accept=".xlsx,.xls" @change="onUploadFileChange" />
+            </div>
+            <div class="form-group">
+              <label>模型</label>
+              <select class="model-select" v-model="uploadModelName">
+                <option value="seal_v4">seal_v4</option>
+                <option value="auto">auto</option>
+                <option value="xgboost" :disabled="!isModelEnabled('xgboost')">xgboost</option>
+                <option value="gru" :disabled="!isModelEnabled('gru')">gru</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>设备号提示（可选）</label>
+              <input class="input" v-model="uploadDevHint" placeholder="例如 demo_a312" />
+            </div>
+            <div class="form-group">
+              <label>处理模式</label>
+              <select class="model-select" v-model="uploadProcessMode">
+                <option value="full">full（整文件回放）</option>
+                <option value="latest">latest（仅最后一点）</option>
+              </select>
+            </div>
+            <button class="btn-primary" @click="submitUploadXlsx" :disabled="uploadingXlsx || !uploadFile">
+              {{ uploadingXlsx ? '上传处理中...' : '上传并检测' }}
+            </button>
+          </div>
+          <div v-if="uploadMessage" class="status-label" style="color:var(--color-warning);margin-top:-8px;margin-bottom:12px;">{{ uploadMessage }}</div>
+          <div v-if="uploadResult" class="json-box">{{ JSON.stringify(uploadResult, null, 2) }}</div>
         </div>
 
         <div class="card">
@@ -419,6 +499,7 @@ import {
   selectDeviceModel,
   startDiagnosisReplay,
   triggerProcess,
+  uploadLocalXlsx,
 } from './api.js'
 
 const page = ref('home')
@@ -474,8 +555,9 @@ const adminJumpPage = ref(1)
 const adminPageSize = ref(50)
 const adminTotal = ref(0)
 const adminTotalPages = computed(() => Math.max(1, Math.ceil(adminTotal.value / adminPageSize.value)))
+const rollbackModelCatalog = computed(() => modelCatalog.value.filter((x) => x.model_name !== 'auto' && x.model_name !== 'seal_v4' && x.enabled))
 const rollbackVersions = computed(() => {
-  const model = modelCatalog.value.find((x) => x.model_name === rollbackModelName.value)
+  const model = rollbackModelCatalog.value.find((x) => x.model_name === rollbackModelName.value)
   return model?.versions || []
 })
 let adminUrlSyncPaused = false
@@ -499,11 +581,37 @@ const modelCatalog = ref([])
 const rollbackModelName = ref('xgboost')
 const rollbackTargetVersion = ref('')
 let diagSSE = null
+const selectedDeviceModelConfig = computed(() => modelCatalog.value.find((x) => x.model_name === deviceSelectedModel.value) || null)
+const selectedDeviceModelEnabled = computed(() => {
+  if (deviceSelectedModel.value === 'none') return true
+  return !!selectedDeviceModelConfig.value?.enabled
+})
+const uploadFile = ref(null)
+const uploadModelName = ref('seal_v4')
+const uploadDevHint = ref('')
+const uploadProcessMode = ref('full')
+const uploadingXlsx = ref(false)
+const uploadResult = ref(null)
+const uploadMessage = ref('')
+const deviceMarkPreview = computed(() => {
+  const marks = Array.isArray(deviceData.value?.marks) ? [...deviceData.value.marks] : []
+  return marks
+    .sort((a, b) => Number(b.display_mark_ts || 0) - Number(a.display_mark_ts || 0))
+    .slice(0, 8)
+})
 
 function formatTime(ts) {
   if (!ts) return '--'
   const v = ts > 1e12 ? ts : ts * 1000
   return new Date(v).toLocaleString('zh-CN')
+}
+
+function badgeClassByTone(item) {
+  const tone = String(item?.tone || '').trim()
+  const risk = String(item?.risk_level || '').trim()
+  if (tone === 'danger' || risk === 'high') return 'badge-anomaly'
+  if (tone === 'warning' || risk === 'watch') return 'badge-warning'
+  return 'badge-muted'
 }
 
 function readAdminStateFromUrl() {
@@ -598,6 +706,11 @@ function normalizeTickerEvent(raw) {
   }
 }
 
+function isModelEnabled(modelName) {
+  const model = modelCatalog.value.find((x) => x.model_name === modelName)
+  return !!model?.enabled
+}
+
 function upsertTickerItems(items = []) {
   const normalized = items
     .map((x) => normalizeTickerEvent(x))
@@ -683,13 +796,13 @@ async function doQueryDevice(custom = {}) {
     }
 
     // 查询前按当前选择处理模型：none=仅查询；其他=先尝试切换模型再查询
-    if (!modelServiceAvailable.value && deviceSelectedModel.value !== 'none') {
-      deviceSelectedModel.value = 'none'
-      deviceModelSource.value = 'none'
-      deviceData.value = null
-      deviceQueryMessage.value = modelServiceMessage.value || '模型服务不可用，已切换为 none 仅查询模式'
-      return
-    } else if (modelServiceAvailable.value && deviceSelectedModel.value !== 'none') {
+    if (deviceSelectedModel.value !== 'none') {
+      const selectedCfg = modelCatalog.value.find((x) => x.model_name === deviceSelectedModel.value)
+      if (!selectedCfg?.enabled) {
+        deviceData.value = null
+        deviceQueryMessage.value = `当前模型 ${deviceSelectedModel.value} 不可用，请切换为 seal_v4、auto 或 none`
+        return
+      }
       const saveRes = await selectDeviceModel(dev, deviceSelectedModel.value)
       if (saveRes.code !== 0) {
         deviceData.value = null
@@ -740,26 +853,24 @@ async function loadModels() {
     if (r.code === 0) {
       const modelEnabled = !!r.data?.model_service_enabled
       modelServiceAvailable.value = modelEnabled
-      modelServiceMessage.value = modelEnabled ? '' : '当前未提供 xgboost/gru 模型，模型切换已禁用，仅支持 none 查询模式'
+      modelServiceMessage.value = modelEnabled ? '' : '当前未提供 xgboost/gru 模型，仍可使用 seal_v4 / auto 进行本地检测'
       const models = r.data?.models || []
       availableModels.value = models.filter((m) => m.enabled)
       modelCatalog.value = models
 
-      if (!modelEnabled) {
-        deviceSelectedModel.value = 'none'
-        deviceModelSource.value = 'none'
-      }
-
-      const firstRollbackModel = models.find((m) => m.model_name !== 'auto')
+      const firstRollbackModel = models.find((m) => m.model_name !== 'auto' && m.model_name !== 'seal_v4' && m.enabled)
       if (firstRollbackModel) {
         rollbackModelName.value = firstRollbackModel.model_name
         rollbackTargetVersion.value = firstRollbackModel.active_version || firstRollbackModel.latest_version || ''
+      } else {
+        rollbackModelName.value = ''
+        rollbackTargetVersion.value = ''
       }
       return
     }
 
     modelServiceAvailable.value = false
-    modelServiceMessage.value = r.message || '模型服务暂不可用，当前仅支持 none 查询模式'
+    modelServiceMessage.value = r.message || '模型目录暂不可用'
     availableModels.value = []
     modelCatalog.value = []
     deviceSelectedModel.value = 'none'
@@ -774,17 +885,13 @@ async function loadModels() {
 
 async function loadDeviceModel(devNum, keepNoneSelection = false) {
   if (!devNum) return
-  if (!modelServiceAvailable.value) {
-    deviceSelectedModel.value = 'none'
-    deviceModelSource.value = 'none'
-    return
-  }
   const r = await fetchDeviceModel(devNum)
   if (r.code === 0 && r.data) {
     if (!(keepNoneSelection && deviceSelectedModel.value === 'none')) {
       deviceSelectedModel.value = r.data.model_name
     }
-    deviceModelSource.value = r.data.source
+    const effective = r.data.effective_model_name
+    deviceModelSource.value = effective && effective !== r.data.model_name ? `${r.data.source} -> ${effective}` : r.data.source
   }
 }
 
@@ -793,6 +900,13 @@ async function saveDeviceModel() {
   if (!dev) return
   if (deviceSelectedModel.value === 'none') {
     deviceModelSaveMessage.value = '当前为 none，仅查询数据，不保存模型'
+    setTimeout(() => {
+      deviceModelSaveMessage.value = ''
+    }, 2500)
+    return
+  }
+  if (!selectedDeviceModelEnabled.value) {
+    deviceModelSaveMessage.value = `当前模型 ${deviceSelectedModel.value} 不可用`
     setTimeout(() => {
       deviceModelSaveMessage.value = ''
     }, 2500)
@@ -926,6 +1040,44 @@ async function submitReplayTask() {
   }
 }
 
+function onUploadFileChange(evt) {
+  const files = evt?.target?.files
+  uploadFile.value = files && files.length ? files[0] : null
+}
+
+async function submitUploadXlsx() {
+  if (!uploadFile.value) {
+    uploadMessage.value = '请先选择 Excel 文件'
+    return
+  }
+  uploadingXlsx.value = true
+  uploadResult.value = null
+  uploadMessage.value = ''
+  try {
+    const r = await uploadLocalXlsx(
+      uploadFile.value,
+      uploadModelName.value,
+      uploadDevHint.value.trim(),
+      uploadProcessMode.value,
+    )
+    uploadResult.value = r
+    if (r.code === 0 && r.data?.dev_num) {
+      queryDev.value = r.data.dev_num
+      deviceSelectedModel.value = r.data.model_name || 'seal_v4'
+      deviceData.value = r.data.detail || null
+      deviceQueryMessage.value = `当前展示为上传文件内存分析结果：${r.data.file_name}。如手动重新查询，将切回数据库设备查询。`
+      page.value = 'device'
+      uploadMessage.value = `上传成功，已完成内存批量检测：${r.data.dev_num}`
+    } else {
+      uploadMessage.value = r.message || '上传失败'
+    }
+  } catch (err) {
+    uploadMessage.value = err?.message || '上传异常'
+  } finally {
+    uploadingXlsx.value = false
+  }
+}
+
 async function refreshReplayTaskStatus() {
   if (!replayTaskId.value) return
   const r = await fetchDiagnosisReplayStatus(replayTaskId.value)
@@ -949,7 +1101,7 @@ function exportFaultCsv() {
 
 async function doRollbackModel() {
   if (!rollbackTargetVersion.value) return
-  if (!modelServiceAvailable.value) {
+  if (!rollbackModelCatalog.value.length) {
     deviceModelSaveMessage.value = '模型服务不可用，暂无法回滚版本'
     setTimeout(() => {
       deviceModelSaveMessage.value = ''
@@ -988,11 +1140,7 @@ watch(showDeviceIdModal, async (v) => {
   if (v) await loadDeviceStatsAndIds()
 })
 
-watch([deviceSelectedModel, modelServiceAvailable], ([selected, available]) => {
-  if (!available && selected !== 'none') {
-    deviceSelectedModel.value = 'none'
-    return
-  }
+watch([deviceSelectedModel, modelCatalog], ([selected]) => {
   if (selected === 'none') {
     deviceModelSource.value = 'none'
   }

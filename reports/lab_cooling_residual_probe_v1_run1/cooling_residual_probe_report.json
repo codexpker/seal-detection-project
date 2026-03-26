@@ -1,0 +1,19 @@
+{
+  "summary": {
+    "run_count": 3,
+    "status_counts": {
+      "cooling_residual_no_segment": 2,
+      "cooling_residual_weak_or_confounded": 1
+    },
+    "candidate_runs": 0,
+    "validation_ready": false,
+    "sealed_with_cooling_block": 0,
+    "unsealed_with_cooling_block": 1
+  },
+  "outputs": {
+    "run_summary_csv": "reports/lab_cooling_residual_probe_v1_run1/cooling_residual_run_summary.csv",
+    "hourly_segment_csv": "reports/lab_cooling_residual_probe_v1_run1/cooling_residual_hourly_segments.csv",
+    "report_md": "reports/lab_cooling_residual_probe_v1_run1/cooling_residual_probe_report.md",
+    "report_json": "reports/lab_cooling_residual_probe_v1_run1/cooling_residual_probe_report.json"
+  }
+}

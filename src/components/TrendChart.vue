@@ -1,20 +1,86 @@
 <template>
   <div ref="chartRef" class="chart-container"></div>
 </template>
- 
+
 <script setup>
-import { ref, watch, onMounted, onUnmounted, shallowRef } from 'vue'
+import { onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import * as echarts from 'echarts'
- 
+
 const props = defineProps({
   series: { type: Array, default: () => [] },
   marks: { type: Array, default: () => [] },
   showZoom: { type: Boolean, default: false },
 })
- 
+
 const chartRef = ref(null)
 const chart = shallowRef(null)
- 
+
+const STATUS_META = {
+  transition_boost_alert: {
+    label: '转移增强告警',
+    short: '转移告警',
+    color: '#ef4444',
+    areaColor: 'rgba(239, 68, 68, 0.10)',
+    riskLevel: 'high',
+  },
+  static_dynamic_supported_alert: {
+    label: '高湿响应支持',
+    short: '高湿支持',
+    color: '#f97316',
+    areaColor: 'rgba(249, 115, 22, 0.10)',
+    riskLevel: 'high',
+  },
+  static_dynamic_support_alert: {
+    label: '高湿响应支持',
+    short: '高湿支持',
+    color: '#f97316',
+    areaColor: 'rgba(249, 115, 22, 0.10)',
+    riskLevel: 'high',
+  },
+  static_hard_case_watch: {
+    label: '难例观察',
+    short: '观察',
+    color: '#eab308',
+    areaColor: 'rgba(234, 179, 8, 0.10)',
+    riskLevel: 'watch',
+  },
+  static_abstain_low_signal: {
+    label: '低信号',
+    short: '低信号',
+    color: '#94a3b8',
+    areaColor: 'rgba(148, 163, 184, 0.10)',
+    riskLevel: 'low',
+  },
+  ongoing: {
+    label: '异常事件',
+    short: '异常',
+    color: '#ef4444',
+    areaColor: 'rgba(239, 68, 68, 0.10)',
+    riskLevel: 'high',
+  },
+  heat_related_background: {
+    label: '热相关背景',
+    short: '热相关',
+    color: '#64748b',
+    areaColor: 'rgba(100, 116, 139, 0.08)',
+    riskLevel: 'low',
+  },
+  low_info_background: {
+    label: '低信息背景',
+    short: '低信息',
+    color: '#64748b',
+    areaColor: 'rgba(100, 116, 139, 0.08)',
+    riskLevel: 'low',
+  },
+  no_detection: {
+    label: '无检测',
+    short: '无检测',
+    color: '#64748b',
+    areaColor: 'rgba(100, 116, 139, 0.08)',
+    riskLevel: 'low',
+  },
+}
+
 function formatTs(ts) {
   const v = ts > 1e12 ? ts : ts * 1000
   const d = new Date(v)
@@ -25,25 +91,174 @@ function formatTs(ts) {
   const DD = String(d.getDate()).padStart(2, '0')
   return `${MM}-${DD} ${hh}:${mm}:${ss}`
 }
- 
-function buildOption() {
-  const times = props.series.map(p => formatTs(p.ts))
-  const inTemp = props.series.map(p => p.in_temp)
-  const outTemp = props.series.map(p => p.out_temp)
-  const inHum = props.series.map(p => p.in_hum)
-  const outHum = props.series.map(p => p.out_hum)
- 
-  const markPoints = props.marks
-    .filter(m => m.display_mark_ts)
-    .map(m => {
-      const label = formatTs(m.display_mark_ts)
-      const idx = times.indexOf(label)
-      return idx >= 0
-        ? { coord: [idx, inTemp[idx]], value: '!', symbol: 'pin', symbolSize: 36, itemStyle: { color: '#EF4444' } }
-        : null
+
+function normalizeTs(ts) {
+  const value = Number(ts || 0)
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return value > 1e12 ? value : value * 1000
+}
+
+function formatNumber(value, digits = 3) {
+  const num = Number(value)
+  return Number.isFinite(num) ? num.toFixed(digits) : '--'
+}
+
+function getStatusMeta(mark = {}) {
+  const key = String(mark.status || '').trim()
+  const meta = STATUS_META[key] || {
+    label: key || '异常标记',
+    short: key ? key.replace(/_/g, ' ') : '标记',
+    color: '#ef4444',
+    areaColor: 'rgba(239, 68, 68, 0.10)',
+    riskLevel: 'high',
+  }
+  return {
+    key,
+    ...meta,
+    label: mark.status_label || meta.label,
+    short: mark.status_short || meta.short,
+    riskLevel: mark.risk_level || meta.riskLevel,
+  }
+}
+
+function nearestIndex(values, target) {
+  if (!values.length || !target) return -1
+  let left = 0
+  let right = values.length - 1
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2)
+    if (values[mid] < target) left = mid + 1
+    else right = mid
+  }
+  const idx = left
+  if (idx <= 0) return 0
+  const prevIdx = idx - 1
+  return Math.abs(values[idx] - target) < Math.abs(values[prevIdx] - target) ? idx : prevIdx
+}
+
+function buildNormalizedMarks(times, tsValues, inHum) {
+  return props.marks
+    .map((mark, order) => {
+      const displayTs = normalizeTs(mark.display_mark_ts || mark.device_timestamp || mark.ts)
+      if (!displayTs) return null
+      const idx = nearestIndex(tsValues, displayTs)
+      if (idx < 0 || idx >= times.length) return null
+      const meta = getStatusMeta(mark)
+      const startTs = normalizeTs(mark.first_detected_ts || displayTs)
+      const endTs = normalizeTs(mark.last_detected_ts || displayTs)
+      const startIdx = nearestIndex(tsValues, startTs)
+      const endIdx = nearestIndex(tsValues, endTs)
+      return {
+        ...mark,
+        order,
+        displayTs,
+        idx,
+        xLabel: times[idx],
+        yHum: Number(inHum[idx]),
+        startIdx,
+        endIdx,
+        color: meta.color,
+        areaColor: meta.areaColor,
+        label: meta.label,
+        short: meta.short,
+        riskLevel: meta.riskLevel,
+      }
     })
     .filter(Boolean)
- 
+}
+
+function buildOption() {
+  if (!props.series.length) {
+    return {
+      backgroundColor: 'transparent',
+      graphic: [
+        {
+          type: 'text',
+          left: 'center',
+          top: 'middle',
+          style: {
+            text: '暂无曲线数据',
+            fill: '#94A3B8',
+            font: '14px Fira Sans',
+          },
+        },
+      ],
+    }
+  }
+
+  const times = props.series.map((p) => formatTs(p.ts))
+  const tsValues = props.series.map((p) => normalizeTs(p.ts))
+  const inTemp = props.series.map((p) => p.in_temp)
+  const outTemp = props.series.map((p) => p.out_temp)
+  const inHum = props.series.map((p) => p.in_hum)
+  const outHum = props.series.map((p) => p.out_hum)
+  const normalizedMarks = buildNormalizedMarks(times, tsValues, inHum)
+  const marksByIndex = normalizedMarks.reduce((acc, mark) => {
+    const key = mark.idx
+    if (!acc.has(key)) acc.set(key, [])
+    acc.get(key).push(mark)
+    return acc
+  }, new Map())
+  const showLabels = normalizedMarks.length <= 8
+
+  const markLineData = normalizedMarks.map((mark) => ({
+    name: mark.label,
+    xAxis: mark.xLabel,
+    lineStyle: {
+      color: mark.color,
+      width: mark.riskLevel === 'high' ? 2 : 1.4,
+      type: mark.riskLevel === 'high' ? 'solid' : 'dashed',
+      opacity: 0.92,
+    },
+    label: { show: false },
+  }))
+
+  const markAreaData = normalizedMarks.map((mark) => {
+    const startIdx = Math.max(0, Math.min(mark.startIdx, mark.endIdx))
+    const endIdxRaw = Math.max(mark.startIdx, mark.endIdx)
+    const endIdx = startIdx === endIdxRaw ? Math.min(times.length - 1, endIdxRaw + 1) : endIdxRaw
+    return [
+      {
+        name: mark.label,
+        xAxis: times[startIdx],
+        itemStyle: { color: mark.areaColor },
+      },
+      {
+        xAxis: times[endIdx],
+      },
+    ]
+  })
+
+  const markScatter = normalizedMarks.map((mark) => ({
+    name: mark.label,
+    value: [mark.xLabel, Number.isFinite(mark.yHum) ? mark.yHum : 0],
+    itemStyle: {
+      color: mark.color,
+      borderColor: '#0f172a',
+      borderWidth: 1,
+      shadowBlur: 10,
+      shadowColor: mark.areaColor,
+    },
+    symbol: mark.riskLevel === 'high' ? 'pin' : 'diamond',
+    symbolSize: mark.riskLevel === 'high' ? 34 : 22,
+    label: {
+      show: showLabels || mark.riskLevel === 'high',
+      formatter: mark.short,
+      position: 'top',
+      color: '#F8FAFC',
+      fontSize: 10,
+      fontFamily: 'Fira Sans',
+      backgroundColor: mark.color,
+      borderRadius: 6,
+      padding: [4, 6],
+      offset: [0, -8],
+    },
+    emphasis: {
+      scale: 1.15,
+      label: { show: true },
+    },
+  }))
+
   const seriesBase = {
     type: 'line',
     smooth: true,
@@ -51,15 +266,53 @@ function buildOption() {
     lineStyle: { width: 2 },
     sampling: 'lttb',
   }
- 
+
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
+      axisPointer: { type: 'cross' },
       backgroundColor: '#1E293B',
       borderColor: '#334155',
       textStyle: { color: '#F8FAFC', fontSize: 12, fontFamily: 'Fira Sans' },
       extraCssText: 'box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.2);',
+      formatter(params) {
+        const lineParams = (params || []).filter((p) => p.seriesType === 'line')
+        const dataIndex = lineParams[0]?.dataIndex
+        const axisLabel = lineParams[0]?.axisValueLabel || '--'
+        let html = `<div style="font-weight:700;margin-bottom:6px;">${axisLabel}</div>`
+        lineParams.forEach((p) => {
+          html += `
+            <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${p.color};"></span>
+              <span style="color:#cbd5e1;min-width:64px;">${p.seriesName}</span>
+              <span style="font-family:'Fira Code', monospace;">${formatNumber(p.data, 2)}</span>
+            </div>
+          `
+        })
+        const matchedMarks = marksByIndex.get(dataIndex) || []
+        if (matchedMarks.length) {
+          html += `<div style="margin:8px 0 6px;border-top:1px solid rgba(148,163,184,0.25);"></div>`
+          matchedMarks.forEach((mark) => {
+            const durationText = mark.first_detected_ts && mark.last_detected_ts && mark.first_detected_ts !== mark.last_detected_ts
+              ? `${formatTs(mark.first_detected_ts)} ~ ${formatTs(mark.last_detected_ts)}`
+              : formatTs(mark.displayTs)
+            html += `
+              <div style="margin:6px 0;padding:6px 8px;border-radius:8px;background:rgba(15,23,42,0.45);border:1px solid ${mark.color};">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                  <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${mark.color};"></span>
+                  <span style="font-weight:700;">${mark.label}</span>
+                  <span style="color:#94a3b8;">${mark.riskLevel}</span>
+                </div>
+                <div style="color:#cbd5e1;font-size:11px;">时间：${durationText}</div>
+                ${mark.anomaly_score != null ? `<div style="color:#cbd5e1;font-size:11px;">分数：${formatNumber(mark.anomaly_score, 3)}</div>` : ''}
+                ${mark.primary_evidence ? `<div style="color:#cbd5e1;font-size:11px;">证据：${mark.primary_evidence}</div>` : ''}
+              </div>
+            `
+          })
+        }
+        return html
+      },
     },
     legend: {
       top: 0,
@@ -95,20 +348,49 @@ function buildOption() {
       },
     ],
     series: [
-      { ...seriesBase, name: '内部温度', data: inTemp, yAxisIndex: 0, color: '#22C55E', markPoint: { data: markPoints } },
+      { ...seriesBase, name: '内部温度', data: inTemp, yAxisIndex: 0, color: '#22C55E' },
       { ...seriesBase, name: '外部温度', data: outTemp, yAxisIndex: 0, color: '#3B82F6' },
-      { ...seriesBase, name: '内部湿度', data: inHum, yAxisIndex: 1, color: '#F59E0B' },
+      {
+        ...seriesBase,
+        name: '内部湿度',
+        data: inHum,
+        yAxisIndex: 1,
+        color: '#F59E0B',
+        markLine: markLineData.length
+          ? {
+              symbol: 'none',
+              silent: true,
+              animation: false,
+              data: markLineData,
+            }
+          : undefined,
+        markArea: markAreaData.length
+          ? {
+              silent: true,
+              animation: false,
+              data: markAreaData,
+            }
+          : undefined,
+      },
       { ...seriesBase, name: '外部湿度', data: outHum, yAxisIndex: 1, color: '#A855F7' },
+      {
+        name: '检测标记',
+        type: 'scatter',
+        yAxisIndex: 1,
+        z: 30,
+        data: markScatter,
+        tooltip: { show: false },
+      },
     ],
   }
- 
+
   if (props.showZoom) {
     option.dataZoom = [
-      { 
-        type: 'slider', 
-        start: 0, 
-        end: 100, 
-        bottom: 10, 
+      {
+        type: 'slider',
+        start: 0,
+        end: 100,
+        bottom: 10,
         textStyle: { color: '#94A3B8', fontFamily: 'Fira Code' },
         borderColor: '#334155',
         fillerColor: 'rgba(34, 197, 94, 0.1)',
@@ -117,24 +399,24 @@ function buildOption() {
       { type: 'inside' },
     ]
   }
- 
+
   return option
 }
- 
+
 function render() {
   if (!chart.value) return
   chart.value.setOption(buildOption(), true)
 }
- 
+
 let ro = null
- 
+
 onMounted(() => {
   chart.value = echarts.init(chartRef.value)
   render()
   ro = new ResizeObserver(() => chart.value && chart.value.resize())
   ro.observe(chartRef.value)
 })
- 
+
 onUnmounted(() => {
   if (ro) ro.disconnect()
   if (chart.value) {
@@ -142,6 +424,6 @@ onUnmounted(() => {
     chart.value = null
   }
 })
- 
+
 watch(() => [props.series, props.marks], render, { deep: true })
 </script>
