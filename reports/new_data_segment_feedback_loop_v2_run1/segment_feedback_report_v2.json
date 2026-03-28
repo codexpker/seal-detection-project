@@ -1,0 +1,50 @@
+{
+  "summary": {
+    "review_rows": 10,
+    "reviewed_rows": 5,
+    "positive_reference_segments": 0,
+    "negative_reference_segments": 0,
+    "transition_positive_segments": 3,
+    "breathing_watch_segments": 1,
+    "confound_segments": 1,
+    "pending_segments": 5,
+    "top_pending_segments": [
+      {
+        "segment_id": "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na::full",
+        "support_status_v3": "static_review_weak_positive_guarded",
+        "memory_role_v2": "hard_negative"
+      },
+      {
+        "segment_id": "120165519_20260309-102255_sealed_extLow_intHigh_noHeat_Change_20260310-1000_unsealed::post_change",
+        "support_status_v3": "transition_secondary_control",
+        "memory_role_v2": NaN
+      },
+      {
+        "segment_id": "120165519_20260313-111811_sealed_extLow_intHigh_Heat_Change_20260315-1500_unsealed::post_change",
+        "support_status_v3": "transition_secondary_control",
+        "memory_role_v2": NaN
+      },
+      {
+        "segment_id": "120165520_20260310-170038_sealed_extEq_intEq_Heat_Change_20260313-1002_unsealed::post_change",
+        "support_status_v3": "transition_secondary_control",
+        "memory_role_v2": NaN
+      },
+      {
+        "segment_id": "120165520_20260318-090358_sealed_extEq_intEq_Heat_Change_20260319-1520_unsealed::post_change",
+        "support_status_v3": "transition_secondary_control",
+        "memory_role_v2": NaN
+      }
+    ]
+  },
+  "outputs": {
+    "merged_review_csv": "reports/new_data_segment_feedback_loop_v2_run1/segment_review_feedback_merged_v2.csv",
+    "positive_reference_csv": "reports/new_data_segment_feedback_loop_v2_run1/confirmed_positive_reference_segments_v2.csv",
+    "negative_reference_csv": "reports/new_data_segment_feedback_loop_v2_run1/confirmed_negative_reference_segments_v2.csv",
+    "transition_positive_csv": "reports/new_data_segment_feedback_loop_v2_run1/confirmed_transition_segments_v2.csv",
+    "breathing_watch_csv": "reports/new_data_segment_feedback_loop_v2_run1/confirmed_breathing_segments_v2.csv",
+    "confound_csv": "reports/new_data_segment_feedback_loop_v2_run1/confirmed_confound_segments_v2.csv",
+    "reranked_pending_csv": "reports/new_data_segment_feedback_loop_v2_run1/pending_segment_review_reranked_v2.csv",
+    "report_md": "reports/new_data_segment_feedback_loop_v2_run1/segment_feedback_report_v2.md",
+    "report_json": "reports/new_data_segment_feedback_loop_v2_run1/segment_feedback_report_v2.json"
+  }
+}

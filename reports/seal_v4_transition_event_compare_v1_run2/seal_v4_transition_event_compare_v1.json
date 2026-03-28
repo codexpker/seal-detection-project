@@ -1,0 +1,30 @@
+{
+  "summary": {
+    "file_count": 7,
+    "primary_count": 3,
+    "secondary_count": 4,
+    "primary_before_any_hit": 2,
+    "primary_after_any_hit": 3,
+    "secondary_before_any_hit": 0,
+    "secondary_after_any_hit": 0,
+    "primary_hit_deltas": [
+      {
+        "file": "120165524_20260304-120007_sealed_extHigh_intLow_noHeat_Change_20260304-1639_unsealed",
+        "transition_hit_delta": 0
+      },
+      {
+        "file": "120165524_20260308-172014_sealed_extHigh_intLow_noHeat_Change_20260310-1000_unsealed",
+        "transition_hit_delta": 0
+      },
+      {
+        "file": "120165524_20260323-213435_seal_extHigh_intLow_noHeat_Change_20260324-9000_unseal",
+        "transition_hit_delta": 11
+      }
+    ]
+  },
+  "outputs": {
+    "compare_csv": "reports/seal_v4_transition_event_compare_v1_run2/seal_v4_transition_event_compare_v1.csv",
+    "report_md": "reports/seal_v4_transition_event_compare_v1_run2/seal_v4_transition_event_compare_v1.md",
+    "report_json": "reports/seal_v4_transition_event_compare_v1_run2/seal_v4_transition_event_compare_v1.json"
+  }
+}

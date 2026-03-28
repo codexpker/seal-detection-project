@@ -1,0 +1,125 @@
+{
+  "summary": {
+    "total_runs": 20,
+    "ok_runs": 20,
+    "change_type_counts": {
+      "no_change": 7,
+      "seal_change_to_unsealed": 7,
+      "heat_on": 3,
+      "heat_off": 2,
+      "ext_humidity_up": 1
+    },
+    "initial_role_counts": {
+      "mainfield_extHigh_intLow_noHeat": 8,
+      "balanced_control": 6,
+      "highhum_heated": 3,
+      "internal_moisture_control": 2,
+      "other": 1
+    },
+    "dominant_label_counts": {
+      "外部高湿驱动工况": 7,
+      "热源稳定工况": 4,
+      "复杂耦合工况": 3,
+      "": 2,
+      "内部积湿工况": 2,
+      "冷却窗口": 1,
+      "热源启动窗口": 1
+    },
+    "segment_role_counts": {
+      "balanced_control": 9,
+      "mainfield_extHigh_intLow_noHeat": 8,
+      "internal_moisture_control": 4,
+      "highhum_heated": 3
+    },
+    "mainfield_whole_runs": 8,
+    "mainfield_full_analyzable_segments": 3,
+    "mainfield_split_analyzable_segments": 5,
+    "mainfield_unsealed_segments": 5,
+    "mainfield_seal_counts": {
+      "unsealed": 5,
+      "sealed": 3
+    },
+    "control_analyzable_segments": 16,
+    "top_candidate_runs": [
+      {
+        "file": "120165524_20260302 161335_sealed_extHigh_intLow_noHeat_noChange_na",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "no_change",
+        "candidate_high_info_ratio": 1.0,
+        "heat_related_ratio": 0.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260304-120007_sealed_extHigh_intLow_noHeat_Change_20260304-1639_unsealed",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "seal_change_to_unsealed",
+        "candidate_high_info_ratio": 1.0,
+        "heat_related_ratio": 0.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260306-160246_sealed_extHigh_intLow_noHeat_noChange_na",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "no_change",
+        "candidate_high_info_ratio": 1.0,
+        "heat_related_ratio": 0.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260308-172014_sealed_extHigh_intLow_noHeat_Change_20260310-1000_unsealed",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "seal_change_to_unsealed",
+        "candidate_high_info_ratio": 1.0,
+        "heat_related_ratio": 0.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260323-213435_seal_extHigh_intLow_noHeat_Change_20260324-9000_unseal",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "seal_change_to_unsealed",
+        "candidate_high_info_ratio": 1.0,
+        "heat_related_ratio": 0.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260321-170450_unseal_extHigh_intLow_Heat_Change_20260321-1800_noHeat",
+        "initial_role": "highhum_heated",
+        "change_type": "heat_off",
+        "candidate_high_info_ratio": 0.8157894736842105,
+        "heat_related_ratio": 0.18421052631578946,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na",
+        "initial_role": "mainfield_extHigh_intLow_noHeat",
+        "change_type": "no_change",
+        "candidate_high_info_ratio": 0.8,
+        "heat_related_ratio": 0.2,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "外部高湿驱动工况"
+      },
+      {
+        "file": "120165524_20260314-174006_unsealed_extHigh_intLow_Heat_noChange_na",
+        "initial_role": "highhum_heated",
+        "change_type": "no_change",
+        "candidate_high_info_ratio": 0.0,
+        "heat_related_ratio": 1.0,
+        "internal_moisture_ratio": 0.0,
+        "dominant_label": "热源稳定工况"
+      }
+    ]
+  },
+  "outputs": {
+    "readme_csv": "reports/new_data_deep_analysis_v1_run1/new_data_readme_normalized.csv",
+    "run_inventory_csv": "reports/new_data_deep_analysis_v1_run1/new_data_run_inventory.csv",
+    "segment_manifest_csv": "reports/new_data_deep_analysis_v1_run1/new_data_segment_manifest.csv",
+    "report_md": "reports/new_data_deep_analysis_v1_run1/new_data_deep_analysis_report.md",
+    "report_json": "reports/new_data_deep_analysis_v1_run1/new_data_deep_analysis_report.json"
+  }
+}

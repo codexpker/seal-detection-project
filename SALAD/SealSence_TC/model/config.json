@@ -1,0 +1,12 @@
+{
+  "W": 48,
+  "H": 6,
+  "inner_stride": 1,
+  "hidden": 64,
+  "layers": 2,
+  "dropout": 0.1,
+  "rule": "5min",
+  "time_col": "time",
+  "smooth_ddah_window": 3,
+  "window_step_hours": 1
+}

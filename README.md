@@ -11,6 +11,8 @@
 3. 检测结果落库（`detection_result_log`）
 4. 首页/诊断页 SSE 实时展示
 5. 故障专档落库与查询（`fault_archive`）
+6. 模型响应分析日志（`model_response_log`，支持 online/replay/compare/upload）
+7. 设备页模型对比回放（只读评估，不写实时检测与故障专档）
 
 近期关键调整：
 
@@ -92,6 +94,32 @@ python3 reader.py
 
 ---
 
+## 当前主流程（前端操作）
+
+### A. 实时监控（首页）
+
+1. 打开“实时主页”，观察当前设备状态、异常类型、实时曲线和设备轮播。
+2. 轮播中的设备号可直接跳转“设备查询”并自动查询锚点区间。
+
+### B. 设备查询与模型对比（设备查询页）
+
+1. 输入设备号后点击“查询”。
+2. 若设备号被拼接（例如两个设备号连在一起），后端会尝试自动识别唯一设备号并回填。
+3. 在“模型对比回放”里：
+   - 选择模型；
+   - 选择区间来源（推荐：按对比小时数）；
+   - 设置最大扫描点；
+   - 点击“执行模型对比”。
+4. 对比完成后可选择“图表预览模型”，查看该模型在同一时间窗的标记效果。
+
+### C. 模型效果复盘（管理页面）
+
+1. 在“模型响应分析（模型评估）”区域选择来源（online/replay/compare/upload）和统计小时。
+2. 点击“刷新分析”查看模型汇总与异常明细。
+3. 点击“状态/执行状态”可打开异常详情弹窗（包含状态解释、分数、阈值、建议动作）。
+
+---
+
 ## 常用接口
 
 ### 健康与运行
@@ -106,9 +134,12 @@ python3 reader.py
 ### 设备查询
 - `GET /api/device/detail/{dev_num}?hours=48&end_ts=<ms>&points_limit=<n>`
 - `GET /api/device/{dev_num}/anomalies?hours=48&page=1&page_size=100`
+- `POST /api/device/compare-models`
 
 ### 管理与诊断
 - `GET /api/admin/recent`
+- `GET /api/model-response/summary?source=all&hours=72&dev_num=`
+- `GET /api/model-response/recent?source=all&hours=72&anomaly_only=true&dev_num=&model_name=`
 - `GET /api/diagnosis/stream`
 - `GET /api/diagnosis/recent`
 - `POST /api/diagnosis/replay`
@@ -127,6 +158,48 @@ python3 reader.py
 - `GET /api/anomaly/v2/review/topk/export`
 - `POST /api/anomaly/v2/review/label`
 - `GET /api/anomaly/v2/review/labels`
+
+---
+
+## 数据落库规则（当前版本）
+
+1. `detection_result_log`
+   - 保存检测流水主表；
+   - `source` 区分 `online/replay/compare/upload`；
+   - 管理页“检测流水”默认仅看 `source='online'`。
+2. `fault_archive`
+   - 异常专档；
+   - 仅保存 `online` 且 `is_anomaly=1` 的结果（正常与回放/对比不入专档）。
+3. `model_response_log`
+   - 模型响应分析表；
+   - 记录各来源（`online/replay/compare/upload`）下每个模型的响应结果；
+   - 用于模型效果复盘（异常率、状态分布、分数对比等）。
+
+---
+
+## 常见问题（当前版本）
+
+### 1) 点击“刷新分析”没反应
+
+- 先看接口返回是否 `code=0` 且 `items=[]`。
+- 这通常表示“接口正常，但当前筛选窗口内无数据/无异常”。
+- 处理建议：
+  1. 去设备页先执行一次“模型对比回放”；
+  2. 回管理页把来源切到 `compare` 或 `all`；
+  3. 再刷新分析。
+
+### 2) 模型对比结果总是 16 条
+
+- 这通常是时间窗内仅有 16 个可扫描点，或扫描点被上限裁剪。
+- 建议：
+  1. 区间来源选“按对比小时数”；
+  2. 提高对比小时数；
+  3. 适当提高“最大扫描点”（20~300）。
+
+### 3) `no data for dev_num=... in range`
+
+- 常见原因：输入设备号拼接了两个值。
+- 当前版本会尝试自动识别唯一设备号并回填；若仍失败，请手动输入单个设备号重试。
 
 ---
 

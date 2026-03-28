@@ -167,6 +167,108 @@ function buildNormalizedMarks(times, tsValues, inHum) {
     .filter(Boolean)
 }
 
+function mergeBandRanges(normalizedMarks, times, denseMarks) {
+  if (!normalizedMarks.length) return []
+  const ranges = normalizedMarks
+    .map((mark) => {
+      const startIdx = Math.max(0, Math.min(mark.startIdx, mark.endIdx))
+      const endIdx = Math.max(mark.startIdx, mark.endIdx)
+      return {
+        startIdx,
+        endIdx,
+        marks: [mark],
+      }
+    })
+    .sort((a, b) => a.startIdx - b.startIdx || a.endIdx - b.endIdx)
+
+  const merged = []
+  for (const range of ranges) {
+    const prev = merged[merged.length - 1]
+    if (!prev || range.startIdx > prev.endIdx + 1) {
+      merged.push({ ...range })
+      continue
+    }
+    prev.endIdx = Math.max(prev.endIdx, range.endIdx)
+    prev.marks.push(...range.marks)
+  }
+
+  return merged.map((range, index) => {
+    const dominant = range.marks.reduce((best, current) => {
+      const bestScore = best?.riskLevel === 'high' ? 2 : best?.riskLevel === 'watch' ? 1 : 0
+      const curScore = current?.riskLevel === 'high' ? 2 : current?.riskLevel === 'watch' ? 1 : 0
+      return curScore >= bestScore ? current : best
+    }, range.marks[0])
+    const areaColor = dominant?.riskLevel === 'high'
+      ? (denseMarks ? 'rgba(239, 68, 68, 0.14)' : 'rgba(239, 68, 68, 0.10)')
+      : (dominant?.areaColor || 'rgba(239, 68, 68, 0.10)')
+    return {
+      bandId: `band_${index + 1}`,
+      startIdx: range.startIdx,
+      endIdx: range.endIdx,
+      xStart: times[range.startIdx],
+      xEnd: times[range.endIdx === range.startIdx ? Math.min(times.length - 1, range.endIdx + 1) : range.endIdx],
+      color: dominant?.color || '#ef4444',
+      areaColor,
+      label: dominant?.label || '异常窗口',
+      short: dominant?.short || '异常',
+      riskLevel: dominant?.riskLevel || 'high',
+      anomalyScore: dominant?.anomaly_score,
+      primaryEvidence: dominant?.primary_evidence,
+      firstDetectedTs: Math.min(...range.marks.map((mark) => normalizeTs(mark.first_detected_ts || mark.displayTs))),
+      lastDetectedTs: Math.max(...range.marks.map((mark) => normalizeTs(mark.last_detected_ts || mark.displayTs))),
+    }
+  })
+}
+
+function buildBandEndpointMarkers(mergedBands, times, inHum, denseMarks) {
+  return mergedBands.flatMap((band) => {
+    const startY = Number(inHum[band.startIdx])
+    const endY = Number(inHum[band.endIdx])
+    const startLabelText = `${denseMarks ? band.short : band.label}开始`
+    const endLabelText = `${denseMarks ? band.short : band.label}结束`
+    return [
+      {
+        bandId: band.bandId,
+        idx: band.startIdx,
+        xLabel: times[band.startIdx],
+        yHum: Number.isFinite(startY) ? startY : 0,
+        color: band.color,
+        areaColor: band.areaColor,
+        label: `${band.label}开始`,
+        short: startLabelText,
+        riskLevel: band.riskLevel,
+        first_detected_ts: band.firstDetectedTs,
+        last_detected_ts: band.lastDetectedTs,
+        displayTs: band.firstDetectedTs,
+        anomaly_score: band.anomalyScore,
+        primary_evidence: band.primaryEvidence,
+        endpointType: 'start',
+        symbol: 'circle',
+        symbolSize: denseMarks ? 14 : 18,
+      },
+      {
+        bandId: band.bandId,
+        idx: band.endIdx,
+        xLabel: times[band.endIdx],
+        yHum: Number.isFinite(endY) ? endY : 0,
+        color: band.color,
+        areaColor: band.areaColor,
+        label: `${band.label}结束`,
+        short: endLabelText,
+        riskLevel: band.riskLevel,
+        first_detected_ts: band.firstDetectedTs,
+        last_detected_ts: band.lastDetectedTs,
+        displayTs: band.lastDetectedTs,
+        anomaly_score: band.anomalyScore,
+        primary_evidence: band.primaryEvidence,
+        endpointType: 'end',
+        symbol: 'pin',
+        symbolSize: denseMarks ? 24 : 30,
+      },
+    ]
+  })
+}
+
 function buildOption() {
   if (!props.series.length) {
     return {
@@ -193,43 +295,52 @@ function buildOption() {
   const inHum = props.series.map((p) => p.in_hum)
   const outHum = props.series.map((p) => p.out_hum)
   const normalizedMarks = buildNormalizedMarks(times, tsValues, inHum)
-  const marksByIndex = normalizedMarks.reduce((acc, mark) => {
+  const denseMarks = normalizedMarks.length > 10
+  const mergedBands = mergeBandRanges(normalizedMarks, times, denseMarks)
+  const endpointMarks = buildBandEndpointMarkers(mergedBands, times, inHum, denseMarks)
+  const marksByIndex = endpointMarks.reduce((acc, mark) => {
     const key = mark.idx
     if (!acc.has(key)) acc.set(key, [])
     acc.get(key).push(mark)
     return acc
   }, new Map())
-  const showLabels = normalizedMarks.length <= 8
-
-  const markLineData = normalizedMarks.map((mark) => ({
-    name: mark.label,
-    xAxis: mark.xLabel,
-    lineStyle: {
-      color: mark.color,
-      width: mark.riskLevel === 'high' ? 2 : 1.4,
-      type: mark.riskLevel === 'high' ? 'solid' : 'dashed',
-      opacity: 0.92,
+  const markLineData = mergedBands.flatMap((band) => ([
+    {
+      name: `${band.label}开始`,
+      xAxis: band.xStart,
+      lineStyle: {
+        color: band.color,
+        width: denseMarks ? 1.2 : 1.6,
+        type: 'solid',
+        opacity: 0.7,
+      },
+      label: { show: false },
     },
-    label: { show: false },
-  }))
-
-  const markAreaData = normalizedMarks.map((mark) => {
-    const startIdx = Math.max(0, Math.min(mark.startIdx, mark.endIdx))
-    const endIdxRaw = Math.max(mark.startIdx, mark.endIdx)
-    const endIdx = startIdx === endIdxRaw ? Math.min(times.length - 1, endIdxRaw + 1) : endIdxRaw
-    return [
-      {
-        name: mark.label,
-        xAxis: times[startIdx],
-        itemStyle: { color: mark.areaColor },
+    {
+      name: `${band.label}结束`,
+      xAxis: band.xEnd,
+      lineStyle: {
+        color: band.color,
+        width: denseMarks ? 1.2 : 1.6,
+        type: 'solid',
+        opacity: 0.7,
       },
-      {
-        xAxis: times[endIdx],
-      },
-    ]
-  })
+      label: { show: false },
+    },
+  ]))
 
-  const markScatter = normalizedMarks.map((mark) => ({
+  const markAreaData = mergedBands.map((band) => ([
+    {
+      name: band.label,
+      xAxis: band.xStart,
+      itemStyle: { color: band.areaColor },
+    },
+    {
+      xAxis: band.xEnd,
+    },
+  ]))
+
+  const markScatter = endpointMarks.map((mark) => ({
     name: mark.label,
     value: [mark.xLabel, Number.isFinite(mark.yHum) ? mark.yHum : 0],
     itemStyle: {
@@ -239,19 +350,19 @@ function buildOption() {
       shadowBlur: 10,
       shadowColor: mark.areaColor,
     },
-    symbol: mark.riskLevel === 'high' ? 'pin' : 'diamond',
-    symbolSize: mark.riskLevel === 'high' ? 34 : 22,
+    symbol: mark.symbol,
+    symbolSize: mark.symbolSize,
     label: {
-      show: showLabels || mark.riskLevel === 'high',
+      show: true,
       formatter: mark.short,
       position: 'top',
       color: '#F8FAFC',
-      fontSize: 10,
+      fontSize: denseMarks ? 9 : 10,
       fontFamily: 'Fira Sans',
       backgroundColor: mark.color,
       borderRadius: 6,
-      padding: [4, 6],
-      offset: [0, -8],
+      padding: denseMarks ? [3, 5] : [4, 6],
+      offset: [0, denseMarks ? -4 : -8],
     },
     emphasis: {
       scale: 1.15,

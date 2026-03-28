@@ -1,0 +1,33 @@
+{
+  "summary": {
+    "run_count": 20,
+    "status_changed_count": 3,
+    "anomaly_changed_count": 3,
+    "before_status_counts": {
+      "low_info_background": 6,
+      "heat_related_background": 7,
+      "static_abstain_low_signal": 1,
+      "static_dynamic_supported_alert": 4,
+      "static_hard_case_watch": 2
+    },
+    "after_status_counts": {
+      "low_info_background": 6,
+      "heat_related_background": 7,
+      "static_abstain_low_signal": 1,
+      "static_hard_case_watch": 5,
+      "static_dynamic_supported_alert": 1
+    },
+    "ext_high_hum_no_heat_count": 7,
+    "ext_high_status_changed_count": 3,
+    "changed_files": [
+      "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na.xlsx",
+      "120165524_20260304-120007_sealed_extHigh_intLow_noHeat_Change_20260304-1639_unsealed.xlsx",
+      "120165524_20260323-213435_seal_extHigh_intLow_noHeat_Change_20260324-9000_unseal.xlsx"
+    ]
+  },
+  "outputs": {
+    "compare_csv": "reports/seal_v4_upgrade_compare_v1_run2/seal_v4_upgrade_compare_v1.csv",
+    "report_md": "reports/seal_v4_upgrade_compare_v1_run2/seal_v4_upgrade_compare_v1.md",
+    "report_json": "reports/seal_v4_upgrade_compare_v1_run2/seal_v4_upgrade_compare_v1.json"
+  }
+}

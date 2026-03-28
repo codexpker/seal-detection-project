@@ -1,0 +1,38 @@
+{
+  "summary": {
+    "segment_support_counts_v2": {
+      "control_challenge_support": 8,
+      "transition_secondary_control": 8,
+      "short_context_only": 7,
+      "static_positive_reference_support": 3,
+      "static_negative_reference_support": 2,
+      "transition_primary_support": 2,
+      "static_supported_weak_positive": 1,
+      "static_watch_breathing_confirmed": 1,
+      "static_watch_confound_confirmed": 1
+    },
+    "run_support_counts_v2": {
+      "control_challenge_support": 7,
+      "transition_secondary_control": 4,
+      "transition_primary_support": 3,
+      "short_context_only": 2,
+      "static_negative_reference_support": 1,
+      "static_supported_weak_positive": 1,
+      "static_watch_breathing_confirmed": 1,
+      "static_watch_confound_confirmed": 1
+    },
+    "review_segment_count_v2": 10,
+    "review_run_count_v2": 10,
+    "transition_primary_runs_v2": 3,
+    "weak_positive_upgraded_runs_v2": 1,
+    "breathing_confirmed_runs_v2": 1,
+    "confound_confirmed_runs_v2": 1
+  },
+  "outputs": {
+    "segment_support_csv": "reports/new_data_segment_static_support_v2_run1/segment_support_output_v2.csv",
+    "run_support_csv": "reports/new_data_segment_static_support_v2_run1/run_support_output_v2.csv",
+    "review_queue_csv": "reports/new_data_segment_static_support_v2_run1/segment_review_queue_v2.csv",
+    "report_md": "reports/new_data_segment_static_support_v2_run1/segment_static_support_report_v2.md",
+    "report_json": "reports/new_data_segment_static_support_v2_run1/segment_static_support_report_v2.json"
+  }
+}

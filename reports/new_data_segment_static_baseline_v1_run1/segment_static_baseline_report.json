@@ -1,0 +1,29 @@
+{
+  "summary": {
+    "reference_count": 5,
+    "apparent_coverage": 0.8,
+    "apparent_precision_on_resolved": 1.0,
+    "loo_coverage": 0.8,
+    "loo_precision_on_resolved": 1.0,
+    "raw_label_counts": {
+      "positive": 4,
+      "negative": 3,
+      "watch": 1
+    },
+    "final_assessment_counts": {
+      "confirmed_positive_reference": 3,
+      "confirmed_negative_reference": 2,
+      "review_weak_positive": 1,
+      "watch_breathing": 1,
+      "watch_confound": 1
+    },
+    "watch_like_count": 3
+  },
+  "outputs": {
+    "predictions_csv": "reports/new_data_segment_static_baseline_v1_run1/segment_static_baseline_predictions.csv",
+    "apparent_refs_csv": "reports/new_data_segment_static_baseline_v1_run1/segment_static_baseline_reference_apparent.csv",
+    "loo_refs_csv": "reports/new_data_segment_static_baseline_v1_run1/segment_static_baseline_reference_loo.csv",
+    "report_md": "reports/new_data_segment_static_baseline_v1_run1/segment_static_baseline_report.md",
+    "report_json": "reports/new_data_segment_static_baseline_v1_run1/segment_static_baseline_report.json"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "summary": {
+    "selected_features": [
+      "best_lag_level_hum",
+      "corr_headroom_in_hum",
+      "corr_out_hum_in_hum",
+      "late_rh_gain_per_out",
+      "max_corr_level_hum",
+      "best_lag_rh_h"
+    ],
+    "health_core_segments": 2,
+    "anomaly_reference_segments": 4,
+    "hard_negative_segments": 2,
+    "current_mainfield_alignment": 0.75,
+    "tri_memory_auc_anomaly_vs_hardnegative": 0.875,
+    "health_only_auc_anomaly_vs_hardnegative": 0.0,
+    "top_segments": [
+      {
+        "segment_id": "120165524_20260302 161335_sealed_extHigh_intLow_noHeat_noChange_na::full",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "health_core",
+        "predicted_memory_role_v2": "health_core",
+        "anomaly_advantage_v2": -76.19181305151277,
+        "health_only_risk_v2": 76.679970170794
+      },
+      {
+        "segment_id": "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na::full",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "anomaly_reference",
+        "predicted_memory_role_v2": "hard_negative",
+        "anomaly_advantage_v2": -5.475595361803923,
+        "health_only_risk_v2": 76.53024235507715
+      },
+      {
+        "segment_id": "120165524_20260304-120007_sealed_extHigh_intLow_noHeat_Change_20260304-1639_unsealed::post_change",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "anomaly_reference",
+        "predicted_memory_role_v2": "anomaly_reference",
+        "anomaly_advantage_v2": 3.530060826610048,
+        "health_only_risk_v2": 76.72459592507265
+      },
+      {
+        "segment_id": "120165524_20260306-160246_sealed_extHigh_intLow_noHeat_noChange_na::full",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "hard_negative",
+        "predicted_memory_role_v2": "hard_negative",
+        "anomaly_advantage_v2": -0.8332071362963216,
+        "health_only_risk_v2": 73.62302553575374
+      },
+      {
+        "segment_id": "120165524_20260308-172014_sealed_extHigh_intLow_noHeat_Change_20260310-1000_unsealed::post_change",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "anomaly_reference",
+        "predicted_memory_role_v2": "anomaly_reference",
+        "anomaly_advantage_v2": 6.546318126524227,
+        "health_only_risk_v2": 76.95748287885908
+      },
+      {
+        "segment_id": "120165524_20260308-172014_sealed_extHigh_intLow_noHeat_Change_20260310-1000_unsealed::pre_change",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "health_core",
+        "predicted_memory_role_v2": "hard_negative",
+        "anomaly_advantage_v2": -5.376896573991209,
+        "health_only_risk_v2": 76.67997017079401
+      },
+      {
+        "segment_id": "120165524_20260321-170450_unseal_extHigh_intLow_Heat_Change_20260321-1800_noHeat::post_change",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "hard_negative",
+        "predicted_memory_role_v2": "hard_negative",
+        "anomaly_advantage_v2": -6.7632667614650614,
+        "health_only_risk_v2": 73.51723550459059
+      },
+      {
+        "segment_id": "120165524_20260323-213435_seal_extHigh_intLow_noHeat_Change_20260324-9000_unseal::post_change",
+        "query_origin_v2": "current_mainfield",
+        "expected_memory_role_v2": "anomaly_reference",
+        "predicted_memory_role_v2": "anomaly_reference",
+        "anomaly_advantage_v2": 2.544205955031874,
+        "health_only_risk_v2": 74.65136814789764
+      },
+      {
+        "segment_id": "old::2025-10-21 101019",
+        "query_origin_v2": "old_hard_negative",
+        "expected_memory_role_v2": "hard_negative",
+        "predicted_memory_role_v2": "hard_negative",
+        "anomaly_advantage_v2": -4.954878667244685,
+        "health_only_risk_v2": 54.63191867005828
+      },
+      {
+        "segment_id": "old::2025-10-28 110628",
+        "query_origin_v2": "old_hard_negative",
+        "expected_memory_role_v2": "hard_negative",
+        "predicted_memory_role_v2": "health_core",
+        "anomaly_advantage_v2": -73.428731030949,
+        "health_only_risk_v2": 36.82503136947513
+      },
+      {
+        "segment_id": "old::2025-11-18 104042",
+        "query_origin_v2": "old_hard_negative",
+        "expected_memory_role_v2": "hard_negative",
+        "predicted_memory_role_v2": "health_core",
+        "anomaly_advantage_v2": -75.43856868019562,
+        "health_only_risk_v2": 40.57189696474941
+      }
+    ]
+  },
+  "outputs": {
+    "memory_bank_csv": "reports/segment_memory_bank_similarity_v2_run1/segment_memory_banks.csv",
+    "scored_csv": "reports/segment_memory_bank_similarity_v2_run1/segment_memory_similarity_scores.csv",
+    "report_md": "reports/segment_memory_bank_similarity_v2_run1/segment_memory_bank_similarity_report.md",
+    "report_json": "reports/segment_memory_bank_similarity_v2_run1/segment_memory_bank_similarity_report.json"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "total_windows": 898,
+  "total_files": 18,
+  "class_distribution": {
+    "外部高湿驱动工况": 266,
+    "复杂耦合工况": 192,
+    "内部积湿工况": 174,
+    "热源稳定工况": 150,
+    "低信息工况": 67,
+    "热源启动窗口": 28,
+    "冷却窗口": 21
+  },
+  "predicted_group_distribution": {
+    "candidate_high_info": 266,
+    "heat_related": 199,
+    "complex_coupled": 192,
+    "internal_moisture": 174,
+    "exclude_low_info": 67
+  },
+  "coverage": {
+    "matched_file_count": 0,
+    "input_only_count": 20,
+    "metadata_only_count": 0
+  },
+  "dominant_labels": {
+    "外部高湿驱动工况": 7,
+    "热源稳定工况": 4,
+    "复杂耦合工况": 3,
+    "内部积湿工况": 2,
+    "冷却窗口": 1,
+    "热源启动窗口": 1
+  },
+  "expected_match_ratio_mean": null
+}

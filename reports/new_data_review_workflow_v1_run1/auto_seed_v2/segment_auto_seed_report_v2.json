@@ -1,0 +1,15 @@
+{
+  "summary": {
+    "row_count": 10,
+    "seeded_rows": 5,
+    "seed_label_counts": {
+      "transition_positive": 3,
+      "breathing_watch": 1,
+      "confound": 1
+    }
+  },
+  "outputs": {
+    "seed_csv": "reports/new_data_review_workflow_v1_run1/auto_seed_v2/segment_review_labels_auto_seed_v2.csv",
+    "report_json": "reports/new_data_review_workflow_v1_run1/auto_seed_v2/segment_auto_seed_report_v2.json"
+  }
+}

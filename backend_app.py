@@ -1,8 +1,10 @@
 import asyncio
 import io
+import importlib.util
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 import uuid
@@ -10,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 import httpx
 import mysql.connector
+from mysql.connector import Error as MySQLError
 import pandas as pd
 from fastapi import FastAPI, File, Form, Path, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,12 +21,15 @@ from pydantic import BaseModel
 
 from src.anomaly_v2 import local_model as local_anomaly_model
 from src.anomaly_v2 import pipeline as v2_pipeline
+from src.anomaly_v2 import salad_adapter
 from src.anomaly_v2 import upload_parser as upload_excel_parser
 
 
 # -----------------------------
 # Config
 # -----------------------------
+
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 
 
 def _env(key: str, default: str) -> str:
@@ -45,6 +51,8 @@ WINDOW_N = int(_env("WINDOW_N", "120"))
 WINDOW_T_MINUTES = int(_env("WINDOW_T_MINUTES", "10"))
 LOCAL_MODEL_WINDOW_N = int(_env("LOCAL_MODEL_WINDOW_N", "5000"))
 LOCAL_MODEL_WINDOW_T_MINUTES = int(_env("LOCAL_MODEL_WINDOW_T_MINUTES", "720"))
+SALAD_MODEL_WINDOW_N = int(_env("SALAD_MODEL_WINDOW_N", "2000"))
+SALAD_MODEL_WINDOW_T_MINUTES = int(_env("SALAD_MODEL_WINDOW_T_MINUTES", "1440"))
 HOME_MIN_DISPLAY_SECONDS = int(_env("HOME_MIN_DISPLAY_SECONDS", "60"))
 MODEL_TIMEOUT_SECONDS = float(_env("MODEL_TIMEOUT_SECONDS", "0.8"))
 MODEL_CONNECT_TIMEOUT_SECONDS = float(_env("MODEL_CONNECT_TIMEOUT_SECONDS", "0.3"))
@@ -63,8 +71,11 @@ ANOMALY_V2_EVENT_MIN_DURATION_SEC = int(_env("ANOMALY_V2_EVENT_MIN_DURATION_SEC"
 ANOMALY_V2_EVENT_COOLDOWN_SEC = int(_env("ANOMALY_V2_EVENT_COOLDOWN_SEC", "900"))
 LOCAL_MODEL_NAME = local_anomaly_model.LOCAL_MODEL_NAME
 LOCAL_MODEL_VERSION = local_anomaly_model.LOCAL_MODEL_VERSION
+SALAD_MODEL_NAME = salad_adapter.SALAD_MODEL_NAME
+SALAD_MODEL_VERSION = salad_adapter.SALAD_MODEL_VERSION
+BUILTIN_MODEL_NAMES = {LOCAL_MODEL_NAME, SALAD_MODEL_NAME}
 EXTERNAL_MODEL_NAMES = {"xgboost", "gru"}
-ALL_MODEL_NAMES = {"auto", "xgboost", "gru", LOCAL_MODEL_NAME}
+ALL_MODEL_NAMES = {"auto", "xgboost", "gru", *BUILTIN_MODEL_NAMES}
 
 
 # -----------------------------
@@ -153,6 +164,48 @@ STATUS_DISPLAY_MAP: Dict[str, Dict[str, str]] = {
         "risk_level": "low",
         "tone": "muted",
     },
+    "salad_low_info": {
+        "status_label": "SALAD低信息工况",
+        "status_short": "低信息",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "salad_sealed": {
+        "status_label": "SALAD判定密封正常",
+        "status_short": "密封",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "salad_unsealed": {
+        "status_label": "SALAD判定密封异常",
+        "status_short": "非密封",
+        "risk_level": "high",
+        "tone": "danger",
+    },
+    "salad_moisture_ingress": {
+        "status_label": "SALAD判定持续进湿",
+        "status_short": "进湿",
+        "risk_level": "high",
+        "tone": "danger",
+    },
+    "salad_moisture_accumulation": {
+        "status_label": "SALAD判定内部积湿",
+        "status_short": "积湿",
+        "risk_level": "high",
+        "tone": "danger",
+    },
+    "salad_unknown": {
+        "status_label": "SALAD未给出明确结果",
+        "status_short": "未知",
+        "risk_level": "low",
+        "tone": "muted",
+    },
+    "salad_error": {
+        "status_label": "SALAD运行异常",
+        "status_short": "异常",
+        "risk_level": "low",
+        "tone": "warning",
+    },
 }
 
 
@@ -181,28 +234,51 @@ def enrich_mark_payload(item: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 
+def enrich_status_item(item: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not item:
+        return item
+    enriched = dict(item)
+    enriched.update(describe_detection_status(item.get("status") or item.get("diagnosis_status")))
+    if "is_anomaly" in enriched:
+        enriched["is_anomaly"] = bool(enriched["is_anomaly"])
+    return enriched
+
+
+def compute_local_transition_event(points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    raw_df = local_anomaly_model.prepare_points_df(points)
+    if raw_df.empty:
+        return None
+    df = local_anomaly_model.resample_points_df(raw_df)
+    if df.empty:
+        return None
+    context = local_anomaly_model.classify_context(df)
+    if context.get("branch") != "ext_high_hum_no_heat":
+        return None
+    return local_anomaly_model.summarize_transition_event(df, True)
+
+
 # -----------------------------
 # Pydantic models
 # -----------------------------
 
 
 class ModelSelectRequest(BaseModel):
-    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4", "salad_gru"] = "auto"
 
 
 class DeviceModelSelectRequest(BaseModel):
-    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4", "salad_gru"] = "auto"
 
 
 class ReplayRequest(BaseModel):
     dev_num: str
     start_ts: int
     end_ts: int
-    model_name: Literal["auto", "xgboost", "gru", "seal_v4"] = "auto"
+    model_name: Literal["auto", "xgboost", "gru", "seal_v4", "salad_gru"] = "auto"
 
 
 class ModelRollbackRequest(BaseModel):
-    model_name: Literal["xgboost", "gru", "auto", "seal_v4"]
+    model_name: Literal["xgboost", "gru", "auto", "seal_v4", "salad_gru"]
     target_version: str
 
 
@@ -228,6 +304,36 @@ class AnomalyV2ReviewLabelRequest(BaseModel):
     label: Literal["true", "false", "uncertain"]
     reviewer: str = ""
     note: str = ""
+
+
+class NewDataReviewFinalizeRequest(BaseModel):
+    readme_xlsx: str = "/Users/xpker/Downloads/data_readme.xlsx"
+    segment_manifest_csv: str = "reports/new_data_segment_pipeline_v1_run1/segment_pipeline_manifest.csv"
+    segment_support_csv: str = "reports/new_data_segment_static_support_v3_run1/segment_support_output_v3.csv"
+    review_queue_csv: str = "reports/new_data_segment_static_support_v3_run1/segment_review_queue_v3.csv"
+    working_labels_csv: str = "reports/new_data_review_workflow_v1_run1/segment_review_labels_working_v2.csv"
+    auto_seed_csv: str = "reports/new_data_segment_auto_seed_labels_v2_run1/segment_review_labels_auto_seed_v2.csv"
+    output_dir: str = "reports/new_data_review_finalize_v1_run1"
+
+
+class DeviceModelCompareRequest(BaseModel):
+    dev_num: str
+    start_ts: int
+    end_ts: int
+    model_names: List[str]
+    max_scan_points: int = 120
+
+
+def build_new_data_review_finalize_defaults() -> Dict[str, str]:
+    return {
+        "readme_xlsx": "/Users/xpker/Downloads/data_readme.xlsx",
+        "segment_manifest_csv": "reports/new_data_segment_pipeline_v1_run1/segment_pipeline_manifest.csv",
+        "segment_support_csv": "reports/new_data_segment_static_support_v3_run1/segment_support_output_v3.csv",
+        "review_queue_csv": "reports/new_data_segment_static_support_v3_run1/segment_review_queue_v3.csv",
+        "working_labels_csv": "reports/new_data_review_workflow_v1_run1/segment_review_labels_working_v2.csv",
+        "auto_seed_csv": "reports/new_data_segment_auto_seed_labels_v2_run1/segment_review_labels_auto_seed_v2.csv",
+        "output_dir": "reports/new_data_review_finalize_v1_run1",
+    }
 
 
 # -----------------------------
@@ -307,14 +413,17 @@ MODEL_VERSION_CATALOG: Dict[str, List[str]] = {
     "xgboost": ["xgboost-2026.01", "xgboost-2026.02"],
     "gru": ["gru-2026.01", "gru-2026.02"],
     LOCAL_MODEL_NAME: [LOCAL_MODEL_VERSION],
+    SALAD_MODEL_NAME: [SALAD_MODEL_VERSION],
     "auto": ["auto"],
 }
 ACTIVE_MODEL_VERSION: Dict[str, str] = {
     "xgboost": "xgboost-2026.02",
     "gru": "gru-2026.02",
     LOCAL_MODEL_NAME: LOCAL_MODEL_VERSION,
+    SALAD_MODEL_NAME: SALAD_MODEL_VERSION,
     "auto": "auto",
 }
+MULTIPART_AVAILABLE = importlib.util.find_spec("multipart") is not None
 ANOMALY_V2_STATE_BY_DEV: Dict[str, Dict[str, Any]] = {}
 ANOMALY_V2_REF_WINDOWS_BY_DEV: Dict[str, List[Dict[str, float]]] = {}
 ANOMALY_V2_LAST_DEBUG_BY_DEV: Dict[str, Dict[str, Any]] = {}
@@ -367,13 +476,62 @@ def resolve_effective_model_name(model_name: Optional[str]) -> str:
         return LOCAL_MODEL_NAME
     if requested in EXTERNAL_MODEL_NAMES:
         return requested if MODEL_SERVICE_ENABLED else LOCAL_MODEL_NAME
-    if requested == LOCAL_MODEL_NAME:
-        return LOCAL_MODEL_NAME
+    if requested in BUILTIN_MODEL_NAMES:
+        return requested
     return LOCAL_MODEL_NAME
 
 
 def is_local_model(model_name: Optional[str]) -> bool:
-    return resolve_effective_model_name(model_name) == LOCAL_MODEL_NAME
+    return resolve_effective_model_name(model_name) in BUILTIN_MODEL_NAMES
+
+
+def model_method_name(model_name: Optional[str]) -> str:
+    effective = resolve_effective_model_name(model_name)
+    if effective == SALAD_MODEL_NAME:
+        return "SALAD_ROUTER"
+    if effective == LOCAL_MODEL_NAME:
+        return "LOCAL_SEAL_V4"
+    return "N_AND_T"
+
+
+def get_builtin_window_config(model_name: Optional[str]) -> Optional[Dict[str, int]]:
+    effective = resolve_effective_model_name(model_name)
+    if effective == LOCAL_MODEL_NAME:
+        return {"n": LOCAL_MODEL_WINDOW_N, "t_minutes": LOCAL_MODEL_WINDOW_T_MINUTES}
+    if effective == SALAD_MODEL_NAME:
+        return {"n": SALAD_MODEL_WINDOW_N, "t_minutes": SALAD_MODEL_WINDOW_T_MINUTES}
+    return None
+
+
+def run_local_json_script(script_rel_path: str, args: List[str]) -> Dict[str, Any]:
+    script_path = os.path.join(PROJECT_ROOT, script_rel_path)
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(f"script not found: {script_rel_path}")
+
+    cmd = ["python3", script_path, *args]
+    env = dict(os.environ)
+    env.setdefault("MPLCONFIGDIR", "/tmp/mplconfig")
+    completed = subprocess.run(
+        cmd,
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    stdout = (completed.stdout or "").strip()
+    stderr = (completed.stderr or "").strip()
+    if completed.returncode != 0:
+        detail = stderr or stdout or f"script exited with code {completed.returncode}"
+        raise RuntimeError(detail)
+    if not stdout:
+        return {}
+    for idx in [pos for pos, ch in enumerate(stdout) if ch == "{"]:
+        try:
+            return json.loads(stdout[idx:])
+        except json.JSONDecodeError:
+            continue
+    return {"stdout": stdout, "stderr": stderr}
 
 
 # -----------------------------
@@ -403,10 +561,12 @@ def bootstrap_schema() -> None:
             "threshold DOUBLE NULL,"
             "infer_latency_ms INT NULL,"
             "status VARCHAR(32) NOT NULL DEFAULT 'ok',"
+            "source VARCHAR(16) NOT NULL DEFAULT 'online',"
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
             "INDEX idx_detection_dev_ts (dev_num, device_timestamp),"
             "INDEX idx_detection_created (created_at),"
-            "INDEX idx_detection_request_id (request_id)"
+            "INDEX idx_detection_request_id (request_id),"
+            "INDEX idx_detection_source_ts (source, device_timestamp)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         ),
         (
@@ -417,7 +577,7 @@ def bootstrap_schema() -> None:
             "first_detected_ts BIGINT NOT NULL,"
             "last_detected_ts BIGINT NOT NULL,"
             "display_mark_ts BIGINT NOT NULL,"
-            "status VARCHAR(16) NOT NULL DEFAULT 'ongoing',"
+            "status VARCHAR(64) NOT NULL DEFAULT 'ongoing',"
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
             "UNIQUE KEY uk_dev_hour (dev_num, event_hour_bucket),"
@@ -503,10 +663,49 @@ def bootstrap_schema() -> None:
             "INDEX idx_review_updated (updated_at)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         ),
+        (
+            "CREATE TABLE IF NOT EXISTS model_response_log ("
+            "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+            "run_id VARCHAR(64) NULL,"
+            "dev_num VARCHAR(50) NOT NULL,"
+            "device_timestamp BIGINT NOT NULL,"
+            "source VARCHAR(16) NOT NULL DEFAULT 'online',"
+            "requested_model_name VARCHAR(32) NOT NULL,"
+            "effective_model_name VARCHAR(32) NOT NULL,"
+            "model_version VARCHAR(64) NULL,"
+            "is_anomaly TINYINT NOT NULL DEFAULT 0,"
+            "anomaly_score DOUBLE NULL,"
+            "threshold DOUBLE NULL,"
+            "status VARCHAR(64) NOT NULL DEFAULT 'unknown',"
+            "risk_level VARCHAR(16) NULL,"
+            "method VARCHAR(64) NULL,"
+            "error_detail VARCHAR(500) NULL,"
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+            "INDEX idx_mrl_dev_ts (dev_num, device_timestamp),"
+            "INDEX idx_mrl_model_source_ts (requested_model_name, source, device_timestamp),"
+            "INDEX idx_mrl_source_created (source, created_at),"
+            "INDEX idx_mrl_run_id (run_id)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        ),
     ]
 
     for ddl in ddl_list:
         execute(ddl)
+
+    # 异常标记需要保存完整执行状态（如 salad_moisture_ingress），避免旧表的 VARCHAR(16) 截断。
+    execute(
+        "ALTER TABLE anomaly_event "
+        "MODIFY COLUMN status VARCHAR(64) NOT NULL DEFAULT 'ongoing'"
+    )
+    try:
+        execute(
+            "ALTER TABLE detection_result_log "
+            "ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'online' AFTER status"
+        )
+    except MySQLError as err:
+        # 1060 = duplicate column name
+        if getattr(err, "errno", None) != 1060:
+            raise
 
 
 def query_all(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
@@ -542,6 +741,96 @@ def hour_bucket(ts_ms: int) -> int:
     return (ts_ms // 3_600_000) * 3_600_000
 
 
+def resolve_query_dev_num(raw_dev_num: str) -> Dict[str, Any]:
+    requested = str(raw_dev_num or "").strip()
+    if not requested:
+        return {"ok": False, "requested_dev_num": requested, "reason": "empty"}
+
+    exact_rows = query_all(
+        "SELECT MAX(device_timestamp) AS latest_ts, COUNT(*) AS cnt "
+        "FROM device_monitoring_data WHERE dev_num=%s",
+        (requested,),
+    )
+    exact_cnt = int(exact_rows[0].get("cnt") or 0) if exact_rows else 0
+    if exact_cnt > 0:
+        latest_ts = int(exact_rows[0].get("latest_ts") or 0) if exact_rows else 0
+        return {
+            "ok": True,
+            "requested_dev_num": requested,
+            "dev_num": requested,
+            "resolved": False,
+            "resolution": "exact",
+            "latest_ts": latest_ts,
+            "candidates": [requested],
+        }
+
+    # 容错：处理用户把两个设备号拼接在一起的情况（如 A+B）。
+    candidates = query_all(
+        "SELECT dev_num, MAX(device_timestamp) AS latest_ts, COUNT(*) AS cnt "
+        "FROM device_monitoring_data "
+        "WHERE LOCATE(dev_num, %s) > 0 "
+        "GROUP BY dev_num "
+        "ORDER BY CHAR_LENGTH(dev_num) DESC, latest_ts DESC "
+        "LIMIT 5",
+        (requested,),
+    )
+    if not candidates:
+        return {
+            "ok": False,
+            "requested_dev_num": requested,
+            "reason": "not_found",
+            "candidates": [],
+        }
+
+    names = [str(row.get("dev_num") or "").strip() for row in candidates if str(row.get("dev_num") or "").strip()]
+    if len(names) == 1:
+        picked = candidates[0]
+        return {
+            "ok": True,
+            "requested_dev_num": requested,
+            "dev_num": names[0],
+            "resolved": True,
+            "resolution": "substring_single",
+            "latest_ts": int(picked.get("latest_ts") or 0),
+            "candidates": names,
+        }
+
+    first_len = len(names[0])
+    second_len = len(names[1])
+    if first_len > second_len:
+        picked = candidates[0]
+        return {
+            "ok": True,
+            "requested_dev_num": requested,
+            "dev_num": names[0],
+            "resolved": True,
+            "resolution": "substring_longest",
+            "latest_ts": int(picked.get("latest_ts") or 0),
+            "candidates": names,
+        }
+
+    return {
+        "ok": False,
+        "requested_dev_num": requested,
+        "reason": "ambiguous",
+        "candidates": names,
+    }
+
+
+def build_dev_num_resolve_error(resolution: Dict[str, Any], *, with_range: bool = False) -> str:
+    requested = str(resolution.get("requested_dev_num") or "").strip()
+    reason = str(resolution.get("reason") or "")
+    if reason == "empty":
+        return "dev_num is required"
+    if reason == "ambiguous":
+        cands = resolution.get("candidates") or []
+        hint = ", ".join(cands[:3]) if cands else "--"
+        return f"dev_num={requested} is ambiguous, please input one device id: {hint}"
+    if with_range:
+        return f"no data for dev_num={requested} in range"
+    return f"no data for dev_num={requested}"
+
+
 def fetch_window(dev_num: str, end_ts: int, n: int, t_minutes: int = 0) -> List[Dict[str, Any]]:
     """取最近 N 条数据；若 t_minutes>0 则额外加时间约束，否则只按条数取。"""
     if t_minutes > 0:
@@ -566,9 +855,9 @@ def fetch_window(dev_num: str, end_ts: int, n: int, t_minutes: int = 0) -> List[
 
 
 def fetch_points_for_model(dev_num: str, end_ts: int, model_name: str) -> List[Dict[str, Any]]:
-    effective_model = resolve_effective_model_name(model_name)
-    if effective_model == LOCAL_MODEL_NAME:
-        return fetch_window(dev_num, end_ts, LOCAL_MODEL_WINDOW_N, LOCAL_MODEL_WINDOW_T_MINUTES)
+    builtin_window = get_builtin_window_config(model_name)
+    if builtin_window:
+        return fetch_window(dev_num, end_ts, builtin_window["n"], builtin_window["t_minutes"])
     return fetch_window(dev_num, end_ts, WINDOW_N, WINDOW_T_MINUTES)
 
 
@@ -589,18 +878,33 @@ def build_upload_dev_num(file_name: str, dev_num_hint: str = "") -> str:
 
 def load_uploaded_excel_points(file_bytes: bytes) -> pd.DataFrame:
     excel = pd.ExcelFile(io.BytesIO(file_bytes))
-    last_error: Optional[Exception] = None
+    sheet_errors: List[str] = []
+    candidates: List[tuple[int, float, str, pd.DataFrame]] = []
     for sheet_name in excel.sheet_names:
         try:
             raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
             df = upload_excel_parser.preprocess_excel_df(raw_df)
             if not df.empty:
-                return df
+                span_hours = 0.0
+                if len(df) >= 2:
+                    span_hours = max(
+                        0.0,
+                        float((df["time"].max() - df["time"].min()).total_seconds() / 3600.0),
+                    )
+                candidates.append((int(len(df)), span_hours, str(sheet_name), df))
+                continue
+            sheet_errors.append(f"{sheet_name}: 预处理后无有效数据")
         except Exception as err:
-            last_error = err
+            sheet_errors.append(f"{sheet_name}: {err}")
             continue
-    if last_error:
-        raise ValueError(f"无法解析上传的 Excel：{last_error}")
+
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return candidates[0][3]
+
+    if sheet_errors:
+        joined = " | ".join(sheet_errors[:6])
+        raise ValueError(f"无法解析上传的 Excel：{joined}")
     raise ValueError("上传文件中未找到可用工作表")
 
 
@@ -628,6 +932,8 @@ async def predict_points_window(
     effective_model_name = resolve_effective_model_name(requested_model_name)
     if effective_model_name == LOCAL_MODEL_NAME:
         return call_local_model(dev_num, points, requested_model_name, device_timestamp)
+    if effective_model_name == SALAD_MODEL_NAME:
+        return call_salad_model(dev_num, points, requested_model_name, device_timestamp)
     return await call_model_service(dev_num, points, effective_model_name, device_timestamp)
 
 
@@ -641,6 +947,373 @@ def compress_marks_by_hour(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted((enrich_mark_payload(x) for x in latest_by_bucket.values()), key=lambda x: int(x["display_mark_ts"]))
 
 
+def enrich_mark_items(dev_num: str, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not items:
+        return []
+
+    normalized_items = [dict(item) for item in items]
+    fallback_buckets = {
+        int(item.get("event_hour_bucket") or hour_bucket(int(item.get("display_mark_ts") or 0)))
+        for item in normalized_items
+        if str(item.get("status") or "").strip() in ("", "ongoing")
+    }
+
+    bucket_status_map: Dict[int, str] = {}
+    if fallback_buckets:
+        start_ts = min(fallback_buckets)
+        end_ts = max(fallback_buckets) + 3_600_000 - 1
+        rows = query_all(
+            "SELECT device_timestamp, status "
+            "FROM detection_result_log "
+            "WHERE dev_num=%s AND is_anomaly=1 AND device_timestamp BETWEEN %s AND %s "
+            "ORDER BY device_timestamp DESC",
+            (dev_num, start_ts, end_ts),
+        )
+        for row in rows:
+            bucket = hour_bucket(int(row.get("device_timestamp") or 0))
+            status = str(row.get("status") or "").strip()
+            if bucket in fallback_buckets and bucket not in bucket_status_map and status and status != "ongoing":
+                bucket_status_map[bucket] = status
+                if len(bucket_status_map) >= len(fallback_buckets):
+                    break
+
+    enriched_items: List[Dict[str, Any]] = []
+    for item in normalized_items:
+        bucket = int(item.get("event_hour_bucket") or hour_bucket(int(item.get("display_mark_ts") or 0)))
+        status = str(item.get("status") or "").strip()
+        if status in ("", "ongoing") and bucket_status_map.get(bucket):
+            item["status"] = bucket_status_map[bucket]
+        enriched_items.append(enrich_mark_payload(item))
+    return enriched_items
+
+
+def reduce_scan_timestamps(scan_timestamps: List[int], max_points: int = 180) -> List[int]:
+    if len(scan_timestamps) <= max_points:
+        return scan_timestamps
+    if max_points <= 1:
+        return [scan_timestamps[-1]]
+    step = (len(scan_timestamps) - 1) / float(max_points - 1)
+    picked: List[int] = []
+    for idx in range(max_points):
+        pos = int(round(idx * step))
+        pos = min(max(pos, 0), len(scan_timestamps) - 1)
+        ts = int(scan_timestamps[pos])
+        if not picked or picked[-1] != ts:
+            picked.append(ts)
+    if picked[-1] != int(scan_timestamps[-1]):
+        picked.append(int(scan_timestamps[-1]))
+    return picked
+
+
+async def compare_models_on_device_range(
+    *,
+    dev_num: str,
+    start_ts: int,
+    end_ts: int,
+    model_names: List[str],
+    max_scan_points: int = 120,
+) -> Dict[str, Any]:
+    if end_ts <= start_ts:
+        raise ValueError("end_ts must be greater than start_ts")
+
+    dev_resolution = resolve_query_dev_num(dev_num)
+    if not bool(dev_resolution.get("ok")):
+        raise ValueError(build_dev_num_resolve_error(dev_resolution, with_range=True))
+    resolved_dev_num = str(dev_resolution.get("dev_num") or dev_num)
+
+    series = query_all(
+        "SELECT device_timestamp AS ts, in_temp, out_temp, in_hum, out_hum "
+        "FROM device_monitoring_data WHERE dev_num=%s AND device_timestamp BETWEEN %s AND %s "
+        "ORDER BY device_timestamp",
+        (resolved_dev_num, start_ts, end_ts),
+    )
+    if not series:
+        raise ValueError(f"no data for dev_num={resolved_dev_num} in range")
+
+    scan_ts_raw = [int(item.get("ts") or 0) for item in series]
+    scan_timestamps = reduce_scan_timestamps(scan_ts_raw, max_points=max_scan_points)
+
+    normalized_models: List[str] = []
+    for name in model_names:
+        model = normalize_model_name(name)
+        if model not in ALL_MODEL_NAMES:
+            continue
+        if model not in normalized_models:
+            normalized_models.append(model)
+
+    results: List[Dict[str, Any]] = []
+    compare_run_id = f"compare_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    for model_name in normalized_models:
+        started = time.perf_counter()
+        detections: List[Dict[str, Any]] = []
+        marks: List[Dict[str, Any]] = []
+
+        skip_reason = ""
+        if model_name in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
+            skip_reason = "model service disabled for external models"
+
+        if not skip_reason:
+            for ts in scan_timestamps:
+                try:
+                    points = fetch_points_for_model(resolved_dev_num, ts, model_name)
+                    if not points:
+                        detections.append(
+                            enrich_status_item(
+                                {
+                                    "device_timestamp": ts,
+                                    "is_anomaly": False,
+                                    "anomaly_score": 0.0,
+                                    "threshold": 0.0,
+                                    "label": None,
+                                    "model_name": resolve_effective_model_name(model_name),
+                                    "model_version": None,
+                                    "status": "insufficient_data",
+                                    "method": model_method_name(model_name),
+                                }
+                            )
+                            or {}
+                        )
+                        continue
+
+                    result = await predict_points_window(resolved_dev_num, points, model_name, ts)
+                    save_model_response_log(
+                        dev_num=resolved_dev_num,
+                        device_timestamp=ts,
+                        requested_model_name=model_name,
+                        effective_model_name=resolve_effective_model_name(model_name),
+                        result=result,
+                        source="compare",
+                        run_id=compare_run_id,
+                    )
+                    detection_item = {
+                        "device_timestamp": ts,
+                        "is_anomaly": bool(result.get("is_anomaly", False)),
+                        "anomaly_score": float(result.get("anomaly_score", 0.0) or 0.0),
+                        "threshold": float(result.get("threshold", 0.0) or 0.0),
+                        "label": result.get("label"),
+                        "model_name": result.get("model_name"),
+                        "model_version": result.get("model_version"),
+                        "status": result.get("status"),
+                        "method": result.get("method", "COMPARE_SCAN"),
+                        "condition": ((result.get("local_context") or {}).get("condition")),
+                        "routed_model": ((result.get("local_context") or {}).get("routed_model")),
+                        "risk_level": ((result.get("local_context") or {}).get("risk_level")),
+                        "primary_evidence": ((result.get("local_context") or {}).get("primary_evidence")),
+                        "error_detail": ((result.get("local_context") or {}).get("error")),
+                    }
+                    detection_item = enrich_status_item(detection_item) or detection_item
+                    detections.append(detection_item)
+
+                    if detection_item.get("is_anomaly"):
+                        marks.append(
+                            enrich_mark_payload(
+                                {
+                                    "dev_num": resolved_dev_num,
+                                    "display_mark_ts": ts,
+                                    "first_detected_ts": ts,
+                                    "last_detected_ts": ts,
+                                    "event_hour_bucket": hour_bucket(ts),
+                                    "status": detection_item.get("status") or "ongoing",
+                                    "anomaly_score": detection_item.get("anomaly_score"),
+                                    "threshold": detection_item.get("threshold"),
+                                    "risk_level": detection_item.get("risk_level"),
+                                    "primary_evidence": detection_item.get("primary_evidence"),
+                                }
+                            )
+                        )
+                except Exception as err:
+                    skip_reason = f"run failed at ts={ts}: {err}"
+                    break
+
+        compressed_marks = compress_marks_by_hour(marks)
+        latest_detection = detections[-1] if detections else None
+        anomaly_count = sum(1 for item in detections if bool(item.get("is_anomaly")))
+        status_distribution: Dict[str, int] = {}
+        for item in detections:
+            status_key = str(item.get("status") or "unknown")
+            status_distribution[status_key] = status_distribution.get(status_key, 0) + 1
+
+        results.append(
+            {
+                "model_name": model_name,
+                "effective_model_name": resolve_effective_model_name(model_name),
+                "available": not bool(skip_reason),
+                "skip_reason": skip_reason or None,
+                "latest_detection": latest_detection,
+                "marks": compressed_marks,
+                "summary": {
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                    "scan_count": len(detections),
+                    "anomaly_count": anomaly_count,
+                    "mark_count": len(compressed_marks),
+                    "status_distribution": status_distribution,
+                },
+            }
+        )
+
+    return {
+        "requested_dev_num": dev_num,
+        "dev_num": resolved_dev_num,
+        "dev_num_resolved": bool(dev_resolution.get("resolved", False)),
+        "dev_num_resolution": dev_resolution.get("resolution"),
+        "run_id": compare_run_id,
+        "range": {
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "series_points": len(series),
+            "scan_points": len(scan_timestamps),
+            "max_scan_points": max_scan_points,
+        },
+        "results": results,
+    }
+
+
+def build_uploaded_salad_analysis(
+    *,
+    df: pd.DataFrame,
+    dev_num: str,
+    requested_model_name: str,
+    process_mode: str,
+    file_name: str,
+) -> Dict[str, Any]:
+    started = time.perf_counter()
+    series = dataframe_to_series(df)
+    if not series:
+        raise ValueError("上传文件无有效数据点")
+
+    start_ts = int(series[0]["ts"])
+    end_ts = int(series[-1]["ts"])
+    scan_results = salad_adapter.run_salad_sliding_scan_df(
+        dev_num=dev_num,
+        df=df,
+        requested_model_name=requested_model_name,
+    )
+    if not scan_results:
+        raise ValueError("SALAD 滑动窗口扫描未生成有效窗口")
+
+    abnormal_windows = [item for item in scan_results if item.get("label") in salad_adapter.SALAD_ABNORMAL_LABELS]
+    abnormal_label_counts: Dict[str, int] = {}
+    for item in abnormal_windows:
+        label = str(item.get("label") or "UNKNOWN").upper()
+        abnormal_label_counts[label] = abnormal_label_counts.get(label, 0) + 1
+    first_abnormal_ts = min((int(item.get("window_start_ts") or 0) for item in abnormal_windows), default=0)
+    last_abnormal_ts = max((int(item.get("window_end_ts") or 0) for item in abnormal_windows), default=0)
+
+    def _window_rank(item: Dict[str, Any]) -> tuple[int, int]:
+        label = str(item.get("label") or "UNKNOWN").upper()
+        severity = int(salad_adapter.SALAD_LABEL_SEVERITY.get(label, 0))
+        return severity, int(item.get("window_end_ts") or 0)
+
+    representative = max(abnormal_windows, key=_window_rank) if abnormal_windows else scan_results[-1]
+    result = representative.get("raw_result") or {}
+    aggregated_is_anomaly = bool(abnormal_windows)
+    representative_label = str(representative.get("label") or "UNKNOWN").upper()
+    representative_status = representative.get("status")
+    representative_condition = representative.get("condition")
+    representative_routed_model = representative.get("routed_model")
+    representative_risk = representative.get("risk_level")
+    representative_evidence = representative.get("primary_evidence")
+    representative_error = representative.get("error_detail")
+    if aggregated_is_anomaly:
+        representative_status = representative_status or "salad_unsealed"
+        representative_risk = representative_risk or "high"
+
+    latest_ts = int(representative.get("window_end_ts") or end_ts)
+
+    latest = {
+        "device_timestamp": latest_ts,
+        "is_anomaly": aggregated_is_anomaly,
+        "anomaly_score": float(result.get("anomaly_score", 0.0) or 0.0),
+        "threshold": float(result.get("threshold", 0.0) or 0.0),
+        "label": representative_label,
+        "model_name": result.get("model_name"),
+        "model_version": result.get("model_version"),
+        "status": representative_status,
+        "method": "SALAD_ROUTER_SCAN",
+        "condition": representative_condition,
+        "routed_model": representative_routed_model,
+        "risk_level": representative_risk,
+        "primary_evidence": representative_evidence,
+        "error_detail": representative_error,
+        "scan_rule": "24h_window_1h_step_any_abnormal",
+    }
+    latest = enrich_status_item(latest) or latest
+
+    marks: List[Dict[str, Any]] = []
+    for window in abnormal_windows:
+        marks.append(
+            enrich_mark_payload(
+                {
+                    "dev_num": dev_num,
+                    "display_mark_ts": int(window.get("window_end_ts") or end_ts),
+                    "first_detected_ts": int(window.get("window_start_ts") or end_ts),
+                    "last_detected_ts": int(window.get("window_end_ts") or end_ts),
+                    "event_hour_bucket": hour_bucket(int(window.get("window_end_ts") or end_ts)),
+                    "status": window.get("status") or "salad_unknown",
+                    "anomaly_score": window.get("anomaly_score"),
+                    "threshold": window.get("threshold"),
+                    "risk_level": window.get("risk_level"),
+                    "primary_evidence": window.get("primary_evidence"),
+                }
+            )
+        )
+    marks = compress_marks_by_hour(marks)
+
+    detail = {
+        "dev_num": dev_num,
+        "range": {
+            "hours": round((end_ts - start_ts) / 3_600_000, 3),
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "latest_ts": end_ts,
+            "anchor_ts": end_ts,
+            "points_limit": None,
+            "source": "upload_xlsx",
+            "file_name": file_name,
+            "scan_points": len(scan_results),
+            "window_contract": "sliding_24h_1h",
+            "window_hours": salad_adapter.SALAD_WINDOW_HOURS,
+            "step_hours": salad_adapter.SALAD_SCAN_STEP_HOURS,
+        },
+        "series": series,
+        "marks": marks,
+        "latest_detection": latest,
+        "scan_summary": {
+            "window_count": len(scan_results),
+            "abnormal_window_count": len(abnormal_windows),
+            "aggregate_rule": "any_abnormal_window",
+            "window_hours": salad_adapter.SALAD_WINDOW_HOURS,
+            "step_hours": salad_adapter.SALAD_SCAN_STEP_HOURS,
+            "first_abnormal_window_ts": first_abnormal_ts or None,
+            "last_abnormal_window_ts": last_abnormal_ts or None,
+            "abnormal_label_counts": abnormal_label_counts,
+        },
+    }
+
+    return {
+        "dev_num": dev_num,
+        "label": latest.get("label", "UNKNOWN"),
+        "detail": detail,
+        "latest_detection": latest,
+        "summary": {
+            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            "row_count": int(len(series)),
+            "scan_count": len(scan_results),
+            "raw_scan_count": len(scan_results),
+            "anomaly_count": len(abnormal_windows),
+            "mark_count": int(len(marks)),
+            "file_name": file_name,
+            "process_mode": process_mode,
+            "effective_model_name": SALAD_MODEL_NAME,
+            "window_contract": "sliding_24h_1h",
+            "aggregate_rule": "any_abnormal_window",
+            "abnormal_window_count": len(abnormal_windows),
+            "first_abnormal_window_ts": first_abnormal_ts or None,
+            "last_abnormal_window_ts": last_abnormal_ts or None,
+        },
+    }
+
+
 async def analyze_uploaded_points(
     *,
     df: pd.DataFrame,
@@ -649,21 +1322,38 @@ async def analyze_uploaded_points(
     process_mode: str,
     file_name: str,
 ) -> Dict[str, Any]:
+    started = time.perf_counter()
+    effective_model_name = resolve_effective_model_name(requested_model_name)
+    if effective_model_name == SALAD_MODEL_NAME:
+        return build_uploaded_salad_analysis(
+            df=df,
+            dev_num=dev_num,
+            requested_model_name=requested_model_name,
+            process_mode=process_mode,
+            file_name=file_name,
+        )
+
     series = dataframe_to_series(df)
     prepared = local_anomaly_model.prepare_points_df(series)
     resampled = local_anomaly_model.resample_points_df(prepared)
 
     if process_mode == "latest":
         scan_timestamps = [int(series[-1]["ts"])]
+        raw_scan_count = 1
     else:
-        scan_timestamps = [int(ts) for ts in resampled["ts"].dropna().astype("int64").tolist()]
-        if not scan_timestamps:
-            scan_timestamps = [int(series[-1]["ts"])]
+        raw_scan_timestamps = [int(ts) for ts in resampled["ts"].dropna().astype("int64").tolist()]
+        if not raw_scan_timestamps:
+            raw_scan_timestamps = [int(series[-1]["ts"])]
+        raw_scan_count = len(raw_scan_timestamps)
+        scan_timestamps = reduce_scan_timestamps(raw_scan_timestamps, 180)
 
     detections: List[Dict[str, Any]] = []
     marks: List[Dict[str, Any]] = []
     point_idx = 0
+    window_start_idx = 0
     prefix_points: List[Dict[str, Any]] = []
+    builtin_window = get_builtin_window_config(effective_model_name)
+    builtin_window_span_ms = (builtin_window["t_minutes"] * 60_000) if builtin_window else None
     for ts in scan_timestamps:
         while point_idx < len(series) and int(series[point_idx]["ts"]) <= ts:
             prefix_points.append(series[point_idx])
@@ -671,18 +1361,29 @@ async def analyze_uploaded_points(
         if not prefix_points:
             continue
 
-        result = await predict_points_window(dev_num, prefix_points, requested_model_name, ts)
+        points_for_scan = prefix_points
+        if builtin_window_span_ms is not None:
+            min_ts = ts - builtin_window_span_ms
+            while window_start_idx < len(prefix_points) and int(prefix_points[window_start_idx]["ts"]) < min_ts:
+                window_start_idx += 1
+            points_for_scan = prefix_points[window_start_idx:]
+
+        result = await predict_points_window(dev_num, points_for_scan, requested_model_name, ts)
         detection_item = {
             "device_timestamp": ts,
             "is_anomaly": bool(result.get("is_anomaly", False)),
             "anomaly_score": float(result.get("anomaly_score", 0.0) or 0.0),
             "threshold": float(result.get("threshold", 0.0) or 0.0),
+            "label": result.get("label"),
             "model_name": result.get("model_name"),
             "model_version": result.get("model_version"),
             "status": result.get("status"),
             "method": result.get("method", "UPLOAD_SCAN"),
+            "condition": ((result.get("local_context") or {}).get("condition")),
+            "routed_model": ((result.get("local_context") or {}).get("routed_model")),
             "risk_level": ((result.get("local_context") or {}).get("risk_level")),
             "primary_evidence": ((result.get("local_context") or {}).get("primary_evidence")),
+            "error_detail": ((result.get("local_context") or {}).get("error")),
         }
         detection_item.update(describe_detection_status(detection_item.get("status")))
         detections.append(detection_item)
@@ -709,11 +1410,19 @@ async def analyze_uploaded_points(
         "is_anomaly": False,
         "anomaly_score": 0.0,
         "threshold": 0.0,
+        "label": None,
         "model_name": resolve_effective_model_name(requested_model_name),
         "model_version": None,
         "status": "no_detection",
         "method": "UPLOAD_SCAN",
+        "condition": None,
+        "routed_model": None,
+        "error_detail": None,
     }
+    latest = enrich_status_item(latest) or latest
+    transition_event = compute_local_transition_event(series)
+    if transition_event:
+        latest["transition_event"] = transition_event
 
     start_ts = int(series[0]["ts"])
     end_ts = int(series[-1]["ts"])
@@ -740,12 +1449,15 @@ async def analyze_uploaded_points(
         "detail": detail,
         "latest_detection": latest,
         "summary": {
+            "elapsed_ms": int((time.perf_counter() - started) * 1000),
             "row_count": int(len(series)),
             "scan_count": int(len(detections)),
+            "raw_scan_count": int(raw_scan_count),
             "anomaly_count": int(anomaly_count),
             "mark_count": int(len(detail["marks"])),
             "file_name": file_name,
             "process_mode": process_mode,
+            "effective_model_name": effective_model_name,
         },
     }
  
@@ -821,7 +1533,24 @@ def call_local_model(dev_num: str, points: List[Dict[str, Any]], requested_model
     return result
 
 
-def save_detection_log(dev_num: str, device_timestamp: int, points: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
+def call_salad_model(dev_num: str, points: List[Dict[str, Any]], requested_model_name: str, device_timestamp: int) -> Dict[str, Any]:
+    result = salad_adapter.run_salad_detection(
+        dev_num=dev_num,
+        device_timestamp=device_timestamp,
+        points=points,
+        requested_model_name=requested_model_name,
+    )
+    result["request_id"] = str(uuid.uuid4())
+    return result
+
+
+def save_detection_log(
+    dev_num: str,
+    device_timestamp: int,
+    points: List[Dict[str, Any]],
+    result: Dict[str, Any],
+    source: str = "online",
+) -> None:
     if points:
         w_start, w_end = points[0]["ts"], points[-1]["ts"]
     else:
@@ -829,8 +1558,8 @@ def save_detection_log(dev_num: str, device_timestamp: int, points: List[Dict[st
     sql = (
         "INSERT INTO detection_result_log "
         "(request_id, dev_num, device_timestamp, window_start_ts, window_end_ts, window_size, model_name, model_version, "
-        "is_anomaly, anomaly_score, threshold, infer_latency_ms, status) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        "is_anomaly, anomaly_score, threshold, infer_latency_ms, status, source) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
     )
     execute(
         sql,
@@ -848,18 +1577,54 @@ def save_detection_log(dev_num: str, device_timestamp: int, points: List[Dict[st
             result.get("threshold"),
             result.get("infer_latency_ms"),
             result.get("status", "ok"),
+            str(source or "online"),
         ),
     )
 
 
-def upsert_anomaly_event(dev_num: str, detected_ts: int) -> Optional[Dict[str, Any]]:
+def save_model_response_log(
+    *,
+    dev_num: str,
+    device_timestamp: int,
+    requested_model_name: str,
+    effective_model_name: str,
+    result: Dict[str, Any],
+    source: str = "online",
+    run_id: Optional[str] = None,
+) -> None:
+    execute(
+        "INSERT INTO model_response_log "
+        "(run_id, dev_num, device_timestamp, source, requested_model_name, effective_model_name, model_version, "
+        "is_anomaly, anomaly_score, threshold, status, risk_level, method, error_detail) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (
+            run_id,
+            dev_num,
+            int(device_timestamp),
+            str(source or "online"),
+            str(requested_model_name or "unknown"),
+            str(effective_model_name or "unknown"),
+            result.get("model_version"),
+            1 if result.get("is_anomaly") else 0,
+            result.get("anomaly_score"),
+            result.get("threshold"),
+            str(result.get("status") or "unknown"),
+            ((result.get("local_context") or {}).get("risk_level")) or result.get("risk_level"),
+            result.get("method"),
+            ((result.get("local_context") or {}).get("error")) or result.get("error_detail"),
+        ),
+    )
+
+
+def upsert_anomaly_event(dev_num: str, detected_ts: int, status: Optional[str] = None) -> Optional[Dict[str, Any]]:
     bucket = hour_bucket(detected_ts)
+    normalized_status = str(status or "ongoing").strip() or "ongoing"
     sql = (
         "INSERT INTO anomaly_event (dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status) "
-        "VALUES (%s,%s,%s,%s,%s,'ongoing') "
-        "ON DUPLICATE KEY UPDATE last_detected_ts=VALUES(last_detected_ts), updated_at=CURRENT_TIMESTAMP"
+        "VALUES (%s,%s,%s,%s,%s,%s) "
+        "ON DUPLICATE KEY UPDATE last_detected_ts=VALUES(last_detected_ts), status=VALUES(status), updated_at=CURRENT_TIMESTAMP"
     )
-    execute(sql, (dev_num, bucket, detected_ts, detected_ts, detected_ts))
+    execute(sql, (dev_num, bucket, detected_ts, detected_ts, detected_ts, normalized_status))
 
     row = query_all(
         "SELECT dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status "
@@ -872,15 +1637,13 @@ def upsert_anomaly_event(dev_num: str, detected_ts: int) -> Optional[Dict[str, A
 def latest_detection(dev_num: str) -> Optional[Dict[str, Any]]:
     rows = query_all(
         "SELECT is_anomaly, anomaly_score, threshold, model_name, model_version, infer_latency_ms, status "
-        "FROM detection_result_log WHERE dev_num=%s ORDER BY device_timestamp DESC LIMIT 1",
+        "FROM detection_result_log WHERE dev_num=%s AND source='online' ORDER BY device_timestamp DESC LIMIT 1",
         (dev_num,),
     )
     if not rows:
         return None
     item = rows[0]
-    item["is_anomaly"] = bool(item["is_anomaly"])
-    item.update(describe_detection_status(item.get("status")))
-    return item
+    return enrich_status_item(item)
 
 
 def get_device_model_info(dev_num: str) -> Dict[str, str]:
@@ -916,6 +1679,12 @@ def set_device_model(dev_num: str, model_name: str) -> None:
 
 def save_fault_archive(payload: Dict[str, Any]) -> None:
     detection = payload.get("detection") or {}
+    # fault_archive 仅作为异常专档；正常检测结果留在 detection_result_log。
+    if not bool(detection.get("is_anomaly")):
+        return
+    if str(payload.get("source") or "online") != "online":
+        return
+
     window = payload.get("window") or {}
     point = payload.get("point") or {}
     anomaly_points = [
@@ -1003,6 +1772,7 @@ async def process_latest_for_device(
     dev_num: str,
     device_timestamp: int,
     model_name_override: Optional[str] = None,
+    run_source: str = "online",
 ) -> Dict[str, Any]:
     RUNTIME_METRICS["process_total"] += 1
     requested_model_name = normalize_model_name(model_name_override or get_device_model_info(dev_num)["model_name"])
@@ -1015,17 +1785,20 @@ async def process_latest_for_device(
             "is_anomaly": False,
             "anomaly_score": 0.0,
             "threshold": 0.0,
-            "model_name": LOCAL_MODEL_NAME if is_local_model(requested_model_name) else model_name,
+            "model_name": model_name if is_local_model(requested_model_name) else model_name,
             "model_version": None,
             "infer_latency_ms": 0,
             "status": "insufficient_data",
             "requested_model_name": requested_model_name,
-            "method": "LOCAL_SEAL_V4" if is_local_model(requested_model_name) else "N_AND_T",
+            "method": model_method_name(requested_model_name),
         }
         RUNTIME_METRICS["process_insufficient"] += 1
     else:
         if is_local_model(requested_model_name):
-            result = call_local_model(dev_num, points, requested_model_name, device_timestamp)
+            if model_name == SALAD_MODEL_NAME:
+                result = call_salad_model(dev_num, points, requested_model_name, device_timestamp)
+            else:
+                result = call_local_model(dev_num, points, requested_model_name, device_timestamp)
             RUNTIME_METRICS["process_ok"] += 1
         else:
             try:
@@ -1068,16 +1841,26 @@ async def process_latest_for_device(
                     }
                     RUNTIME_METRICS["process_model_error"] += 1
 
-    save_detection_log(dev_num, device_timestamp, points, result)
+    save_detection_log(dev_num, device_timestamp, points, result, source=run_source)
+    save_model_response_log(
+        dev_num=dev_num,
+        device_timestamp=device_timestamp,
+        requested_model_name=requested_model_name,
+        effective_model_name=model_name,
+        result=result,
+        source=run_source,
+        run_id=result.get("request_id"),
+    )
 
     mark = None
-    if result["is_anomaly"]:
-        mark = upsert_anomaly_event(dev_num, device_timestamp)
+    if result["is_anomaly"] and run_source == "online":
+        mark = upsert_anomaly_event(dev_num, device_timestamp, result.get("status"))
 
     latest_point = points[-1] if points else {"ts": device_timestamp}
     event_payload = {
         "request_id": result["request_id"],
         "dev_num": dev_num,
+        "source": run_source,
         "device_timestamp": device_timestamp,
         "window": {
             "start_ts": points[0]["ts"] if points else device_timestamp,
@@ -1090,6 +1873,10 @@ async def process_latest_for_device(
         "detection": result,
         "mark": mark,
     }
+    event_payload["detection"] = enrich_status_item(event_payload["detection"]) or event_payload["detection"]
+    transition_event = ((event_payload["detection"].get("local_context") or {}).get("transition_event"))
+    if transition_event:
+        event_payload["detection"]["transition_event"] = transition_event
 
     save_fault_archive(event_payload)
 
@@ -1134,6 +1921,9 @@ async def process_latest_for_device(
             "model_name": result.get("model_name"),
             "status": result.get("status"),
             "anomaly_score": result.get("anomaly_score"),
+            "risk_level": ((result.get("local_context") or {}).get("risk_level")),
+            "status_label": describe_detection_status(result.get("status")).get("status_label"),
+            "tone": describe_detection_status(result.get("status")).get("tone"),
         },
     )
 
@@ -1302,12 +2092,12 @@ def home_current():
 
     # 若当前展示设备已无最近检测记录（历史残留/重启后状态脏数据），自动回退到最新检测设备
     latest_row = query_all(
-        "SELECT dev_num FROM detection_result_log ORDER BY device_timestamp DESC LIMIT 1"
+        "SELECT dev_num FROM detection_result_log WHERE source='online' ORDER BY device_timestamp DESC LIMIT 1"
     )
     if latest_row:
         latest_dev = latest_row[0].get("dev_num")
         has_current = query_all(
-            "SELECT 1 AS ok FROM detection_result_log WHERE dev_num=%s LIMIT 1",
+            "SELECT 1 AS ok FROM detection_result_log WHERE dev_num=%s AND source='online' LIMIT 1",
             (dev_num,),
         )
         if not has_current and latest_dev:
@@ -1321,8 +2111,11 @@ def home_current():
         "WHERE dev_num=%s ORDER BY display_mark_ts DESC LIMIT 100",
         (dev_num,),
     )
-    marks = [enrich_mark_payload(item) for item in marks]
+    marks = enrich_mark_items(dev_num, marks)
     detection = latest_detection(dev_num)
+    transition_event = compute_local_transition_event(points)
+    if detection and transition_event:
+        detection["transition_event"] = transition_event
     current_ts = now_ms()
     remain = max(0, HOME_MIN_DISPLAY_SECONDS - int((current_ts - home_state.current_since_ts) / 1000))
     data = {
@@ -1347,11 +2140,12 @@ def home_device_ticker(limit: int = Query(50, ge=1, le=200)):
     rows = query_all(
         "SELECT dev_num, device_timestamp, is_anomaly, model_name, status, anomaly_score "
         "FROM detection_result_log "
-        "ORDER BY device_timestamp DESC LIMIT %s",
+        "WHERE source='online' ORDER BY device_timestamp DESC LIMIT %s",
         (limit,),
     )
     for row in rows:
         row["is_anomaly"] = bool(row.get("is_anomaly"))
+        row.update(describe_detection_status(row.get("status")))
     return ok({"limit": limit, "items": rows})
 
 
@@ -1390,9 +2184,14 @@ def device_curve(
     end_ts: Optional[int] = Query(None),
     points_limit: Optional[int] = Query(None, ge=10, le=1000),
 ):
+    dev_resolution = resolve_query_dev_num(dev_num)
+    if not bool(dev_resolution.get("ok")):
+        return fail(1002, build_dev_num_resolve_error(dev_resolution, with_range=True))
+    resolved_dev_num = str(dev_resolution.get("dev_num") or dev_num)
+
     latest_row = query_all(
         "SELECT MAX(device_timestamp) AS latest_ts FROM device_monitoring_data WHERE dev_num=%s",
-        (dev_num,),
+        (resolved_dev_num,),
     )
     latest_ts = int(latest_row[0]["latest_ts"]) if latest_row and latest_row[0].get("latest_ts") else 0
 
@@ -1403,11 +2202,11 @@ def device_curve(
             "SELECT device_timestamp AS ts, in_temp, out_temp, in_hum, out_hum "
             "FROM device_monitoring_data WHERE dev_num=%s AND device_timestamp <= %s "
             "ORDER BY device_timestamp DESC LIMIT %s",
-            (dev_num, anchor_ts, points_limit),
+            (resolved_dev_num, anchor_ts, points_limit),
         )
         series = list(reversed(rows_desc))
         if not series:
-            return fail(1002, f"no data for dev_num={dev_num}")
+            return fail(1002, f"no data for dev_num={resolved_dev_num}")
         start_ts = int(series[0]["ts"])
         end_range_ts = int(series[-1]["ts"])
     else:
@@ -1417,20 +2216,27 @@ def device_curve(
             "SELECT device_timestamp AS ts, in_temp, out_temp, in_hum, out_hum "
             "FROM device_monitoring_data WHERE dev_num=%s AND device_timestamp BETWEEN %s AND %s "
             "ORDER BY device_timestamp",
-            (dev_num, start_ts, end_range_ts),
+            (resolved_dev_num, start_ts, end_range_ts),
         )
         if not series:
-            return fail(1002, f"no data for dev_num={dev_num}")
+            return fail(1002, f"no data for dev_num={resolved_dev_num}")
 
     marks = query_all(
         "SELECT dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status FROM anomaly_event "
         "WHERE dev_num=%s AND display_mark_ts BETWEEN %s AND %s ORDER BY display_mark_ts",
-        (dev_num, start_ts, end_range_ts),
+        (resolved_dev_num, start_ts, end_range_ts),
     )
-    marks = [enrich_mark_payload(item) for item in marks]
+    marks = enrich_mark_items(resolved_dev_num, marks)
+    detection = latest_detection(resolved_dev_num)
+    transition_event = compute_local_transition_event(series)
+    if detection and transition_event:
+        detection["transition_event"] = transition_event
     return ok(
         {
-            "dev_num": dev_num,
+            "dev_num": resolved_dev_num,
+            "requested_dev_num": dev_num,
+            "dev_num_resolved": bool(dev_resolution.get("resolved", False)),
+            "dev_num_resolution": dev_resolution.get("resolution"),
             "range": {
                 "hours": hours,
                 "start_ts": start_ts,
@@ -1441,7 +2247,7 @@ def device_curve(
             },
             "series": series,
             "marks": marks,
-            "latest_detection": latest_detection(dev_num),
+            "latest_detection": detection,
         }
     )
 
@@ -1453,13 +2259,18 @@ def device_anomalies(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
 ):
+    dev_resolution = resolve_query_dev_num(dev_num)
+    if not bool(dev_resolution.get("ok")):
+        return fail(1002, build_dev_num_resolve_error(dev_resolution, with_range=True))
+    resolved_dev_num = str(dev_resolution.get("dev_num") or dev_num)
+
     end_ts = now_ms()
     start_ts = end_ts - hours * 3600 * 1000
     offset = (page - 1) * page_size
 
     total_rows = query_all(
         "SELECT COUNT(*) AS cnt FROM anomaly_event WHERE dev_num=%s AND display_mark_ts BETWEEN %s AND %s",
-        (dev_num, start_ts, end_ts),
+        (resolved_dev_num, start_ts, end_ts),
     )
     total = int(total_rows[0]["cnt"]) if total_rows else 0
 
@@ -1467,10 +2278,47 @@ def device_anomalies(
         "SELECT dev_num, event_hour_bucket, first_detected_ts, last_detected_ts, display_mark_ts, status "
         "FROM anomaly_event WHERE dev_num=%s AND display_mark_ts BETWEEN %s AND %s "
         "ORDER BY display_mark_ts DESC LIMIT %s OFFSET %s",
-        (dev_num, start_ts, end_ts, page_size, offset),
+        (resolved_dev_num, start_ts, end_ts, page_size, offset),
     )
-    items = [enrich_mark_payload(item) for item in items]
-    return ok({"dev_num": dev_num, "page": page, "page_size": page_size, "total": total, "items": items})
+    items = enrich_mark_items(resolved_dev_num, items)
+    return ok(
+        {
+            "dev_num": resolved_dev_num,
+            "requested_dev_num": dev_num,
+            "dev_num_resolved": bool(dev_resolution.get("resolved", False)),
+            "dev_num_resolution": dev_resolution.get("resolution"),
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "items": items,
+        }
+    )
+
+
+@app.post("/api/device/compare-models")
+async def device_compare_models(req: DeviceModelCompareRequest):
+    dev_num = str(req.dev_num or "").strip()
+    if not dev_num:
+        return fail(1007, "dev_num is required")
+    if req.end_ts <= req.start_ts:
+        return fail(1005, "end_ts must be greater than start_ts")
+
+    max_scan_points = max(20, min(int(req.max_scan_points or 120), 300))
+    model_names = [str(x or "").strip() for x in (req.model_names or []) if str(x or "").strip()]
+    if not model_names:
+        return fail(1007, "model_names is required")
+
+    try:
+        data = await compare_models_on_device_range(
+            dev_num=dev_num,
+            start_ts=int(req.start_ts),
+            end_ts=int(req.end_ts),
+            model_names=model_names,
+            max_scan_points=max_scan_points,
+        )
+    except Exception as err:
+        return fail(1002, str(err))
+    return ok(data)
 
 
 @app.get("/api/device/stats")
@@ -1532,7 +2380,7 @@ def admin_recent(
 ):
     offset = (page - 1) * page_size
 
-    conditions: List[str] = []
+    conditions: List[str] = ["source='online'"]
     params: List[Any] = []
 
     if status == "anomaly":
@@ -1563,7 +2411,8 @@ def admin_recent(
         tuple(params + [page_size, offset]),
     )
     for item in items:
-        item["is_anomaly"] = bool(item["is_anomaly"])
+        enriched = enrich_status_item(item) or item
+        item.update(enriched)
     return ok(
         {
             "page": page,
@@ -1606,7 +2455,8 @@ def fault_recent(
     dev_num: str = Query("", max_length=50),
     hours: int = Query(0, ge=0, le=8760),
 ):
-    conditions: List[str] = []
+    # “故障档案”语义上只展示异常记录；正常记录请走 admin/recent。
+    conditions: List[str] = ["is_anomaly=1"]
     params: List[Any] = []
 
     dev_num = dev_num.strip()
@@ -1629,7 +2479,8 @@ def fault_recent(
         tuple(params + [limit]),
     )
     for item in items:
-        item["is_anomaly"] = bool(item["is_anomaly"])
+        enriched = enrich_status_item(item) or item
+        item.update(enriched)
     return ok({"limit": limit, "dev_num": dev_num, "hours": hours, "items": items})
 
 
@@ -1638,11 +2489,12 @@ def diagnosis_faults_recent(limit: int = Query(50, ge=1, le=500)):
     items = query_all(
         "SELECT request_id, dev_num, device_timestamp, event_hour_bucket, is_anomaly, anomaly_score, threshold, "
         "model_name, model_version, method, anomaly_points_json, diagnosis_status, created_at "
-        "FROM fault_archive ORDER BY device_timestamp DESC LIMIT %s",
+        "FROM fault_archive WHERE is_anomaly=1 ORDER BY device_timestamp DESC LIMIT %s",
         (limit,),
     )
     for item in items:
-        item["is_anomaly"] = bool(item["is_anomaly"])
+        enriched = enrich_status_item(item) or item
+        item.update(enriched)
     return ok({"limit": limit, "items": items})
 
 
@@ -1669,7 +2521,8 @@ def diagnosis_recent(limit: int = Query(200, ge=1, le=1000)):
         (limit,),
     )
     for i in items:
-        i["is_anomaly"] = bool(i["is_anomaly"])
+        enriched = enrich_status_item(i) or i
+        i.update(enriched)
     return ok({"limit": limit, "items": items})
 
 
@@ -1689,7 +2542,8 @@ def diagnosis_by_device(
         (dev_num, start_ts, end_ts, limit),
     )
     for i in items:
-        i["is_anomaly"] = bool(i["is_anomaly"])
+        enriched = enrich_status_item(i) or i
+        i.update(enriched)
     return ok({"dev_num": dev_num, "range": {"hours": hours, "start_ts": start_ts, "end_ts": end_ts}, "items": items})
 
 
@@ -1709,7 +2563,14 @@ def _run_replay_task(task_id: str, req: ReplayRequest) -> None:
             device_ts = int(row["device_timestamp"])
             try:
                 override = normalize_model_name(req.model_name)
-                asyncio.run(process_latest_for_device(req.dev_num, device_ts, model_name_override=override))
+                asyncio.run(
+                    process_latest_for_device(
+                        req.dev_num,
+                        device_ts,
+                        model_name_override=override,
+                        run_source="replay",
+                    )
+                )
                 REPLAY_TASKS[task_id]["processed"] = idx
             except Exception as err:
                 REPLAY_TASKS[task_id]["failed"] += 1
@@ -1938,7 +2799,7 @@ async def diagnosis_replay_recent_device(
             if queued == 1:
                 await enqueue_device_process(dev_num, ts)
             else:
-                await process_latest_for_device(dev_num, ts)
+                await process_latest_for_device(dev_num, ts, run_source="replay")
             ok_count += 1
         except Exception as err:
             fail_count += 1
@@ -2628,6 +3489,7 @@ def models():
             "default_model": DEFAULT_MODEL,
             "model_service_enabled": MODEL_SERVICE_ENABLED,
             "local_model_name": LOCAL_MODEL_NAME,
+            "local_model_names": sorted(BUILTIN_MODEL_NAMES),
             "models": [
                 {
                     "model_name": LOCAL_MODEL_NAME,
@@ -2635,6 +3497,15 @@ def models():
                     "latest_version": LOCAL_MODEL_VERSION,
                     "active_version": ACTIVE_MODEL_VERSION[LOCAL_MODEL_NAME],
                     "versions": MODEL_VERSION_CATALOG[LOCAL_MODEL_NAME],
+                    "rollback_supported": False,
+                },
+                {
+                    "model_name": SALAD_MODEL_NAME,
+                    "enabled": True,
+                    "latest_version": SALAD_MODEL_VERSION,
+                    "active_version": ACTIVE_MODEL_VERSION[SALAD_MODEL_NAME],
+                    "versions": MODEL_VERSION_CATALOG[SALAD_MODEL_NAME],
+                    "rollback_supported": False,
                 },
                 {
                     "model_name": "xgboost",
@@ -2642,6 +3513,7 @@ def models():
                     "latest_version": MODEL_VERSION_CATALOG["xgboost"][-1],
                     "active_version": ACTIVE_MODEL_VERSION["xgboost"],
                     "versions": MODEL_VERSION_CATALOG["xgboost"],
+                    "rollback_supported": True,
                 },
                 {
                     "model_name": "gru",
@@ -2649,6 +3521,7 @@ def models():
                     "latest_version": MODEL_VERSION_CATALOG["gru"][-1],
                     "active_version": ACTIVE_MODEL_VERSION["gru"],
                     "versions": MODEL_VERSION_CATALOG["gru"],
+                    "rollback_supported": True,
                 },
                 {
                     "model_name": "auto",
@@ -2656,6 +3529,7 @@ def models():
                     "latest_version": "auto",
                     "active_version": ACTIVE_MODEL_VERSION["auto"],
                     "versions": MODEL_VERSION_CATALOG["auto"],
+                    "rollback_supported": False,
                 },
             ],
         }
@@ -2674,76 +3548,13 @@ def model_select(req: ModelSelectRequest):
 
 @app.post("/api/models/rollback")
 def model_rollback(req: ModelRollbackRequest):
-    if req.model_name == LOCAL_MODEL_NAME:
-        return fail(1003, "local model does not support rollback")
+    if req.model_name in BUILTIN_MODEL_NAMES:
+        return fail(1003, "builtin local model does not support rollback")
     versions = MODEL_VERSION_CATALOG.get(req.model_name, [])
     if req.target_version not in versions:
         return fail(1003, f"unsupported target_version={req.target_version}")
     ACTIVE_MODEL_VERSION[req.model_name] = req.target_version
     return ok({"model_name": req.model_name, "active_version": req.target_version, "updated_at": now_ms()})
-
-
-@app.get("/api/fault/recent/export")
-def fault_recent_export_csv(
-    limit: int = Query(1000, ge=1, le=20000),
-    dev_num: str = Query("", max_length=50),
-    hours: int = Query(0, ge=0, le=8760),
-):
-    conditions: List[str] = []
-    params: List[Any] = []
-
-    dev_num = dev_num.strip()
-    if dev_num:
-        conditions.append("dev_num LIKE %s")
-        params.append(f"%{dev_num}%")
-
-    if hours > 0:
-        end_ts = now_ms()
-        start_ts = end_ts - hours * 3600 * 1000
-        conditions.append("device_timestamp BETWEEN %s AND %s")
-        params.extend([start_ts, end_ts])
-
-    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    items = query_all(
-        "SELECT request_id, dev_num, device_timestamp, event_hour_bucket, is_anomaly, anomaly_score, threshold, "
-        "model_name, model_version, method, diagnosis_status, created_at "
-        f"FROM fault_archive{where_clause} ORDER BY device_timestamp DESC LIMIT %s",
-        tuple(params + [limit]),
-    )
-
-    header = [
-        "request_id",
-        "dev_num",
-        "device_timestamp",
-        "event_hour_bucket",
-        "is_anomaly",
-        "anomaly_score",
-        "threshold",
-        "model_name",
-        "model_version",
-        "method",
-        "diagnosis_status",
-        "created_at",
-    ]
-    lines = [",".join(header)]
-    for row in items:
-        values = []
-        for key in header:
-            val = row.get(key)
-            text = "" if val is None else str(val)
-            text = text.replace('"', '""')
-            if "," in text or '"' in text:
-                text = f'"{text}"'
-            values.append(text)
-        lines.append(",".join(values))
-
-    csv_text = "\n".join(lines)
-    return PlainTextResponse(
-        content=csv_text,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=fault_recent.csv"},
-    )
 
 
 @app.get("/api/device/{dev_num}/model")
@@ -2801,50 +3612,111 @@ async def internal_process(
     return ok(payload)
 
 
-@app.post("/api/upload/xlsx")
-async def upload_local_xlsx(
-    file: UploadFile = File(...),
-    model_name: str = Form("seal_v4"),
-    dev_num_hint: str = Form(""),
-    process_mode: str = Form("full"),
-):
-    normalized_model = normalize_model_name(model_name)
-    if normalized_model not in ALL_MODEL_NAMES:
-        return fail(1003, f"unsupported model_name={model_name}")
-    if normalized_model in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
-        return fail(1004, "model service disabled for external models")
-    if process_mode not in {"full", "latest"}:
-        return fail(1005, "process_mode must be full or latest")
+if MULTIPART_AVAILABLE:
+    @app.post("/api/upload/xlsx")
+    async def upload_local_xlsx(
+        file: UploadFile = File(...),
+        model_name: str = Form("seal_v4"),
+        dev_num_hint: str = Form(""),
+        process_mode: str = Form("full"),
+    ):
+        normalized_model = normalize_model_name(model_name)
+        if normalized_model not in ALL_MODEL_NAMES:
+            return fail(1003, f"unsupported model_name={model_name}")
+        if normalized_model in EXTERNAL_MODEL_NAMES and not MODEL_SERVICE_ENABLED:
+            return fail(1004, "model service disabled for external models")
+        if process_mode not in {"full", "latest"}:
+            return fail(1005, "process_mode must be full or latest")
 
-    file_bytes = await file.read()
-    if not file_bytes:
-        return fail(1002, "empty upload file")
+        file_bytes = await file.read()
+        if not file_bytes:
+            return fail(1002, "empty upload file")
 
-    try:
-        df = load_uploaded_excel_points(file_bytes)
-    except Exception as err:
-        return fail(1002, str(err))
+        try:
+            df = load_uploaded_excel_points(file_bytes)
+        except Exception as err:
+            return fail(1002, str(err))
 
-    upload_dev_num = build_upload_dev_num(file.filename or "upload.xlsx", dev_num_hint)
-    try:
-        analysis = await analyze_uploaded_points(
-            df=df,
-            dev_num=upload_dev_num,
-            requested_model_name=normalized_model,
-            process_mode=process_mode,
-            file_name=file.filename or "upload.xlsx",
+        upload_dev_num = build_upload_dev_num(file.filename or "upload.xlsx", dev_num_hint)
+        try:
+            analysis = await analyze_uploaded_points(
+                df=df,
+                dev_num=upload_dev_num,
+                requested_model_name=normalized_model,
+                process_mode=process_mode,
+                file_name=file.filename or "upload.xlsx",
+            )
+        except Exception as err:
+            return fail(1002, f"upload analysis failed: {err}")
+
+        return ok(
+            {
+                **analysis,
+                "model_name": normalized_model,
+                "effective_model_name": resolve_effective_model_name(normalized_model),
+                "process_mode": process_mode,
+                "file_name": file.filename,
+                "source": "upload_xlsx_memory",
+            }
         )
-    except Exception as err:
-        return fail(1002, f"upload analysis failed: {err}")
+else:
+    @app.post("/api/upload/xlsx")
+    async def upload_local_xlsx_unavailable():
+        return fail(1002, "python-multipart not installed; upload_xlsx route is unavailable")
 
+
+@app.post("/api/review/new-data/finalize")
+def review_new_data_finalize(req: NewDataReviewFinalizeRequest):
+    try:
+        payload = run_local_json_script(
+            "src/scripts/new_data_review_finalize_v1.py",
+            [
+                "--readme-xlsx", req.readme_xlsx,
+                "--segment-manifest-csv", req.segment_manifest_csv,
+                "--segment-support-csv", req.segment_support_csv,
+                "--review-queue-csv", req.review_queue_csv,
+                "--working-labels-csv", req.working_labels_csv,
+                "--auto-seed-csv", req.auto_seed_csv,
+                "--output-dir", req.output_dir,
+            ],
+        )
+    except FileNotFoundError as err:
+        return fail(1002, str(err))
+    except RuntimeError as err:
+        return fail(1002, f"new-data review finalize failed: {err}")
+    except Exception as err:
+        return fail(1002, f"unexpected finalize error: {err}")
+
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    outputs = payload.get("outputs", {}) if isinstance(payload, dict) else {}
     return ok(
         {
-            **analysis,
-            "model_name": normalized_model,
-            "effective_model_name": resolve_effective_model_name(normalized_model),
-            "process_mode": process_mode,
-            "file_name": file.filename,
-            "source": "upload_xlsx_memory",
+            "summary": summary,
+            "outputs": outputs,
+            "requested_at": now_ms(),
+            "workflow": "new_data_review_finalize_v1",
+        }
+    )
+
+
+@app.get("/api/review/new-data/config")
+def review_new_data_config():
+    defaults = build_new_data_review_finalize_defaults()
+    file_status = {
+        key: {
+            "path": value,
+            "exists": os.path.exists(value),
+            "is_dir": os.path.isdir(value),
+        }
+        for key, value in defaults.items()
+    }
+    return ok(
+        {
+            "workflow": "new_data_review_finalize_v1",
+            "defaults": defaults,
+            "file_status": file_status,
+            "multipart_available": MULTIPART_AVAILABLE,
+            "requested_at": now_ms(),
         }
     )
 
@@ -2865,13 +3737,127 @@ def runtime_metrics():
     })
 
 
+@app.get("/api/model-response/recent")
+def model_response_recent(
+    limit: int = Query(200, ge=1, le=5000),
+    dev_num: str = Query("", max_length=50),
+    source: str = Query("all", pattern="^(all|online|replay|compare|upload)$"),
+    model_name: str = Query("", max_length=32),
+    hours: int = Query(0, ge=0, le=8760),
+    anomaly_only: bool = Query(False),
+):
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    dev = dev_num.strip()
+    if dev:
+        conditions.append("dev_num LIKE %s")
+        params.append(f"%{dev}%")
+
+    if source != "all":
+        conditions.append("source=%s")
+        params.append(source)
+
+    model = normalize_model_name(model_name) if model_name.strip() else ""
+    if model:
+        conditions.append("requested_model_name=%s")
+        params.append(model)
+
+    if anomaly_only:
+        conditions.append("is_anomaly=1")
+
+    if hours > 0:
+        end_ts = now_ms()
+        start_ts = end_ts - hours * 3600 * 1000
+        conditions.append("device_timestamp BETWEEN %s AND %s")
+        params.extend([start_ts, end_ts])
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = query_all(
+        "SELECT run_id, dev_num, device_timestamp, source, requested_model_name, effective_model_name, model_version, "
+        "is_anomaly, anomaly_score, threshold, status, risk_level, method, error_detail, created_at "
+        f"FROM model_response_log{where_clause} ORDER BY device_timestamp DESC LIMIT %s",
+        tuple(params + [limit]),
+    )
+    for row in rows:
+        row["is_anomaly"] = bool(row.get("is_anomaly"))
+        row.update(describe_detection_status(row.get("status")))
+    return ok(
+        {
+            "limit": limit,
+            "dev_num": dev,
+            "source": source,
+            "model_name": model or None,
+            "hours": hours,
+            "anomaly_only": anomaly_only,
+            "items": rows,
+        }
+    )
+
+
+@app.get("/api/model-response/summary")
+def model_response_summary(
+    source: str = Query("all", pattern="^(all|online|replay|compare|upload)$"),
+    hours: int = Query(24, ge=1, le=8760),
+    dev_num: str = Query("", max_length=50),
+):
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    end_ts = now_ms()
+    start_ts = end_ts - hours * 3600 * 1000
+    conditions.append("device_timestamp BETWEEN %s AND %s")
+    params.extend([start_ts, end_ts])
+
+    dev = dev_num.strip()
+    if dev:
+        conditions.append("dev_num LIKE %s")
+        params.append(f"%{dev}%")
+
+    if source != "all":
+        conditions.append("source=%s")
+        params.append(source)
+
+    where_clause = " WHERE " + " AND ".join(conditions)
+    rows = query_all(
+        "SELECT requested_model_name, COUNT(*) AS total_count, "
+        "SUM(CASE WHEN is_anomaly=1 THEN 1 ELSE 0 END) AS anomaly_count, "
+        "AVG(anomaly_score) AS avg_score, MAX(anomaly_score) AS max_score "
+        f"FROM model_response_log{where_clause} GROUP BY requested_model_name "
+        "ORDER BY anomaly_count DESC, avg_score DESC",
+        tuple(params),
+    )
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        total = int(row.get("total_count") or 0)
+        anomaly = int(row.get("anomaly_count") or 0)
+        items.append(
+            {
+                "model_name": row.get("requested_model_name"),
+                "total_count": total,
+                "anomaly_count": anomaly,
+                "anomaly_rate": (anomaly / total) if total > 0 else 0.0,
+                "avg_score": row.get("avg_score"),
+                "max_score": row.get("max_score"),
+            }
+        )
+
+    return ok(
+        {
+            "scope": {"source": source, "hours": hours, "start_ts": start_ts, "end_ts": end_ts, "dev_num": dev or None},
+            "items": items,
+        }
+    )
+
+
 @app.get("/api/fault/recent/export")
 def fault_recent_export(
     limit: int = Query(1000, ge=1, le=50000),
     dev_num: str = Query("", max_length=50),
     hours: int = Query(0, ge=0, le=8760),
 ):
-    conditions: List[str] = []
+    # 与 fault_recent 保持一致：导出仅包含异常档案。
+    conditions: List[str] = ["is_anomaly=1"]
     params: List[Any] = []
 
     dev_num = dev_num.strip()

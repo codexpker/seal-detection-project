@@ -1,0 +1,45 @@
+{
+  "summary": {
+    "review_rows": 10,
+    "reviewed_rows": 0,
+    "positive_reference_segments": 0,
+    "negative_reference_segments": 0,
+    "transition_positive_segments": 0,
+    "breathing_watch_segments": 0,
+    "confound_segments": 0,
+    "pending_segments": 10,
+    "top_pending_segments": [
+      {
+        "segment_id": "120165524_20260308-172014_sealed_extHigh_intLow_noHeat_Change_20260310-1000_unsealed::post_change",
+        "support_status_v2": "transition_primary_support"
+      },
+      {
+        "segment_id": "120165524_20260323-213435_seal_extHigh_intLow_noHeat_Change_20260324-9000_unseal::post_change",
+        "support_status_v2": "transition_primary_support"
+      },
+      {
+        "segment_id": "120165524_20260304-120007_sealed_extHigh_intLow_noHeat_Change_20260304-1639_unsealed::post_change",
+        "support_status_v2": "transition_primary_support"
+      },
+      {
+        "segment_id": "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na::full",
+        "support_status_v2": "static_supported_weak_positive"
+      },
+      {
+        "segment_id": "120165524_20260306-160246_sealed_extHigh_intLow_noHeat_noChange_na::full",
+        "support_status_v2": "static_watch_breathing_confirmed"
+      }
+    ]
+  },
+  "outputs": {
+    "merged_review_csv": "reports/new_data_segment_feedback_loop_v1_run1/segment_review_feedback_merged.csv",
+    "positive_reference_csv": "reports/new_data_segment_feedback_loop_v1_run1/confirmed_positive_reference_segments.csv",
+    "negative_reference_csv": "reports/new_data_segment_feedback_loop_v1_run1/confirmed_negative_reference_segments.csv",
+    "transition_positive_csv": "reports/new_data_segment_feedback_loop_v1_run1/confirmed_transition_segments.csv",
+    "breathing_watch_csv": "reports/new_data_segment_feedback_loop_v1_run1/confirmed_breathing_segments.csv",
+    "confound_csv": "reports/new_data_segment_feedback_loop_v1_run1/confirmed_confound_segments.csv",
+    "reranked_pending_csv": "reports/new_data_segment_feedback_loop_v1_run1/pending_segment_review_reranked.csv",
+    "report_md": "reports/new_data_segment_feedback_loop_v1_run1/segment_feedback_report.md",
+    "report_json": "reports/new_data_segment_feedback_loop_v1_run1/segment_feedback_report.json"
+  }
+}

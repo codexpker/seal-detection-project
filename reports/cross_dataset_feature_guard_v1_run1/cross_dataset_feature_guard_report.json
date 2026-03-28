@@ -1,0 +1,158 @@
+{
+  "summary": {
+    "positive_count": 4,
+    "negative_count": 5,
+    "old_hard_negative_count": 3,
+    "top_guard_features": [
+      {
+        "feature": "best_lag_level_hum",
+        "direction": "neg",
+        "positive_median": 0.0,
+        "positive_match": 3,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 7,
+        "guard_total": 9,
+        "guard_match_ratio": 0.7777777777777778
+      },
+      {
+        "feature": "corr_headroom_in_hum",
+        "direction": "neg",
+        "positive_median": -0.9130194196291104,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 5,
+        "negative_total": 5,
+        "guard_match": 7,
+        "guard_total": 9,
+        "guard_match_ratio": 0.7777777777777778
+      },
+      {
+        "feature": "corr_out_hum_in_hum",
+        "direction": "pos",
+        "positive_median": 0.9902075438119426,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 5,
+        "negative_total": 5,
+        "guard_match": 7,
+        "guard_total": 9,
+        "guard_match_ratio": 0.7777777777777778
+      },
+      {
+        "feature": "late_rh_gain_per_out",
+        "direction": "pos",
+        "positive_median": 2.945691238520862,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 5,
+        "negative_total": 5,
+        "guard_match": 7,
+        "guard_total": 9,
+        "guard_match_ratio": 0.7777777777777778
+      },
+      {
+        "feature": "max_corr_level_hum",
+        "direction": "pos",
+        "positive_median": 0.9940270664844773,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 5,
+        "negative_total": 5,
+        "guard_match": 7,
+        "guard_total": 9,
+        "guard_match_ratio": 0.7777777777777778
+      },
+      {
+        "feature": "best_lag_rh_h",
+        "direction": "neg",
+        "positive_median": 0.0,
+        "positive_match": 3,
+        "positive_total": 4,
+        "negative_match": 3,
+        "negative_total": 4,
+        "guard_match": 6,
+        "guard_total": 8,
+        "guard_match_ratio": 0.75
+      },
+      {
+        "feature": "early_ah_resp_ratio",
+        "direction": "pos",
+        "positive_median": 0.9,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 3,
+        "negative_total": 3,
+        "guard_match": 5,
+        "guard_total": 7,
+        "guard_match_ratio": 0.7142857142857143
+      },
+      {
+        "feature": "best_lag_dew_h",
+        "direction": "pos",
+        "positive_median": 1.5,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 6,
+        "guard_total": 9,
+        "guard_match_ratio": 0.6666666666666666
+      },
+      {
+        "feature": "corr_dew_gap_in_dew",
+        "direction": "neg",
+        "positive_median": -0.9470139164569112,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 6,
+        "guard_total": 9,
+        "guard_match_ratio": 0.6666666666666666
+      },
+      {
+        "feature": "dew_gap_area_pos",
+        "direction": "pos",
+        "positive_median": 256.16578236993473,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 6,
+        "guard_total": 9,
+        "guard_match_ratio": 0.6666666666666666
+      },
+      {
+        "feature": "end_start_dAH",
+        "direction": "pos",
+        "positive_median": 0.3627432437190405,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 6,
+        "guard_total": 9,
+        "guard_match_ratio": 0.6666666666666666
+      },
+      {
+        "feature": "headroom_gain_ratio",
+        "direction": "pos",
+        "positive_median": 0.0007858693810776,
+        "positive_match": 2,
+        "positive_total": 4,
+        "negative_match": 4,
+        "negative_total": 5,
+        "guard_match": 6,
+        "guard_total": 9,
+        "guard_match_ratio": 0.6666666666666666
+      }
+    ]
+  },
+  "outputs": {
+    "guard_csv": "reports/cross_dataset_feature_guard_v1_run1/cross_dataset_feature_guard.csv",
+    "report_md": "reports/cross_dataset_feature_guard_v1_run1/cross_dataset_feature_guard_report.md",
+    "report_json": "reports/cross_dataset_feature_guard_v1_run1/cross_dataset_feature_guard_report.json"
+  }
+}

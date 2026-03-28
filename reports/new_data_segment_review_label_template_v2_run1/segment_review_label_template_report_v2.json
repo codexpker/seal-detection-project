@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "row_count": 10,
+    "review_priority_counts": {
+      "7": 4,
+      "0": 3,
+      "2": 1,
+      "3": 1,
+      "5": 1
+    },
+    "support_status_counts": {
+      "transition_secondary_control": 4,
+      "transition_primary_support": 3,
+      "static_review_weak_positive_guarded": 1,
+      "static_watch_breathing_hardguard": 1,
+      "static_watch_confound_hardguard": 1
+    }
+  },
+  "outputs": {
+    "template_csv": "reports/new_data_segment_review_label_template_v2_run1/segment_review_labels_template_v2.csv",
+    "report_md": "reports/new_data_segment_review_label_template_v2_run1/segment_review_label_template_report_v2.md",
+    "report_json": "reports/new_data_segment_review_label_template_v2_run1/segment_review_label_template_report_v2.json"
+  }
+}

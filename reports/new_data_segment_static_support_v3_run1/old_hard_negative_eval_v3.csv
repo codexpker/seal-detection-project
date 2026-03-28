@@ -1,0 +1,4 @@
+﻿segment_id,query_origin_v2,provisional_role_v1,expected_memory_role_v2,distance_health_core,distance_anomaly_reference,distance_hard_negative,predicted_memory_role_v2,memory_alignment_v2,anomaly_advantage_v2,health_only_risk_v2
+old::2025-10-21 101019,old_hard_negative,old_hard_negative,hard_negative,54.63191867005828,25.71430204506931,20.759423377824625,hard_negative,True,-4.954878667244685,54.63191867005828
+old::2025-10-28 110628,old_hard_negative,old_hard_negative,hard_negative,36.82503136947513,110.25376240042412,106.77786190682332,health_core,False,-73.428731030949,36.82503136947513
+old::2025-11-18 104042,old_hard_negative,old_hard_negative,hard_negative,40.57189696474941,116.01046564494504,113.01547884622282,health_core,False,-75.43856868019562,40.57189696474941

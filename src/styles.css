@@ -574,7 +574,40 @@ h1, h2, h3 {
   font: inherit;
 }
 
+.status-chip-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-text-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  font: inherit;
+  padding: 0;
+}
+
+.anomaly-detail-card {
+  width: min(760px, 94vw);
+}
+
+.detail-value {
+  color: var(--color-text-muted);
+  max-width: 68%;
+  text-align: right;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .table-link:focus-visible,
+.status-chip-btn:focus-visible,
+.status-text-btn:focus-visible,
 .btn-primary:focus-visible,
 .nav-tab:focus-visible,
 .input:focus-visible,

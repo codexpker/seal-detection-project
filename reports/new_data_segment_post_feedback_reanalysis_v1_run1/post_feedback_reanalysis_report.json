@@ -1,0 +1,228 @@
+{
+  "summary": {
+    "mainfield_segment_count": 8,
+    "provisional_role_counts": {
+      "transition_positive": 3,
+      "negative_reference": 2,
+      "breathing_watch": 1,
+      "confound": 1,
+      "positive_reference": 1
+    },
+    "top_re_ranked_features": [
+      {
+        "feature": "delta_half_in_h",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": -0.31504542982154504,
+        "positive_median": 2.378134819458378
+      },
+      {
+        "feature": "early_dew_gain_per_out",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": 0.3214284253098647,
+        "positive_median": 1.0845531334876746
+      },
+      {
+        "feature": "late_dew_gain_per_out",
+        "auc": 1.0,
+        "direction": "neg",
+        "negative_median": 1.4860110050809314,
+        "positive_median": 0.8297771980742539
+      },
+      {
+        "feature": "late_minus_early_dew_gain",
+        "auc": 1.0,
+        "direction": "neg",
+        "negative_median": 1.1645825797710667,
+        "positive_median": -0.3411921604036433
+      },
+      {
+        "feature": "late_minus_early_rh_gain",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": -0.105318731794598,
+        "positive_median": 1.766353761129049
+      },
+      {
+        "feature": "late_minus_early_vpd_gap",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": -0.06210652495632896,
+        "positive_median": 0.0581276778525743
+      },
+      {
+        "feature": "max_corr_outRH_inRH_change",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": -0.0516166976558608,
+        "positive_median": 0.8310859565863982
+      },
+      {
+        "feature": "slope_in_h_per_h",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": -0.05863015516322715,
+        "positive_median": 0.08968961508819825
+      },
+      {
+        "feature": "weak_positive_support_score_v2",
+        "auc": 1.0,
+        "direction": "pos",
+        "negative_median": 0.41666666666666663,
+        "positive_median": 0.8333333333333333
+      },
+      {
+        "feature": "amp_in_hum_p90_p10",
+        "auc": 0.875,
+        "direction": "pos",
+        "negative_median": 1.4619999999999997,
+        "positive_median": 3.815999999999999
+      },
+      {
+        "feature": "best_lag_h",
+        "auc": 0.875,
+        "direction": "pos",
+        "negative_median": 0.5,
+        "positive_median": 1.5
+      },
+      {
+        "feature": "best_lag_level_ah",
+        "auc": 0.875,
+        "direction": "pos",
+        "negative_median": 0.5,
+        "positive_median": 1.5
+      }
+    ],
+    "top_challenge_useful_features": [
+      {
+        "feature": "delta_half_in_h",
+        "auc": 1.0,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "late_minus_early_rh_gain",
+        "auc": 1.0,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "weak_positive_support_score_v2",
+        "auc": 1.0,
+        "positive_reference_toward_positive": true,
+        "transition_positive_toward_positive": false,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "best_lag_level_hum",
+        "auc": 0.875,
+        "positive_reference_toward_positive": true,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": true,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "end_start_dAH",
+        "auc": 0.875,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "late_rh_gain_per_out",
+        "auc": 0.875,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "vpd_in_mean",
+        "auc": 0.875,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "ah_gap_q90",
+        "auc": 0.75,
+        "positive_reference_toward_positive": true,
+        "transition_positive_toward_positive": false,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "breathing_suppression_score_v2",
+        "auc": 0.75,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "confound_reject_score_v2",
+        "auc": 0.75,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "corr_headroom_in_hum",
+        "auc": 0.75,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      },
+      {
+        "feature": "positive_drive_ratio",
+        "auc": 0.75,
+        "positive_reference_toward_positive": false,
+        "transition_positive_toward_positive": true,
+        "breathing_watch_toward_positive": false,
+        "confound_toward_positive": false,
+        "challenge_match": 3,
+        "total_roles": 4
+      }
+    ]
+  },
+  "outputs": {
+    "inventory_csv": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_segment_inventory.csv",
+    "feature_ranking_csv": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_feature_ranking.csv",
+    "challenge_usefulness_csv": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_challenge_usefulness.csv",
+    "distance_csv": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_distance_view.csv",
+    "report_md": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_reanalysis_report.md",
+    "report_json": "reports/new_data_segment_post_feedback_reanalysis_v1_run1/post_feedback_reanalysis_report.json"
+  }
+}

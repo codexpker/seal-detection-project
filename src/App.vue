@@ -31,8 +31,8 @@
                 <div class="status-item">
                   <span class="status-label">检测状态</span>
                   <span class="status-value">
-                    <span v-if="homeDetection" :class="['badge', homeDetection.is_anomaly ? 'badge-anomaly' : 'badge-ok']">
-                      {{ homeDetection.is_anomaly ? '异常' : '正常' }}
+                    <span v-if="homeDetection" :class="['badge', triStateBadgeClass(homeDetection)]">
+                      {{ triStateLabel(homeDetection) }}
                     </span>
                     <span v-else class="badge badge-muted">--</span>
                   </span>
@@ -40,6 +40,10 @@
                 <div class="status-item">
                   <span class="status-label">模型（首页固定）</span>
                   <span class="status-value">{{ homeDetection?.model_name || 'auto' }}</span>
+                </div>
+                <div class="status-item">
+                  <span class="status-label">异常类型</span>
+                  <span class="status-value">{{ homeDetection?.status_label || homeDetection?.status || '--' }}</span>
                 </div>
                 <div class="status-item">
                   <span class="status-label">剩余展示</span>
@@ -52,6 +56,38 @@
                   <span class="status-label">最后更新</span>
                   <span class="status-value">{{ homeLastUpdateTs ? formatTime(homeLastUpdateTs) : '--' }}</span>
                 </div>
+              </div>
+              <div class="device-input-row" style="margin-top:12px;margin-bottom:0;">
+                <div class="form-group">
+                  <label>首页默认模型</label>
+                  <select class="model-select" v-model="homeSelectedModel">
+                    <option
+                      v-for="m in modelCatalog"
+                      :key="`home_${m.model_name}`"
+                      :value="m.model_name"
+                      :disabled="!m.enabled"
+                    >
+                      {{ m.model_name }}{{ m.enabled ? '' : '（未提供）' }}
+                    </option>
+                  </select>
+                </div>
+                <button
+                  class="btn-primary cursor-pointer"
+                  @click="saveHomeModel"
+                  :disabled="switchingHomeModel || !isModelEnabled(homeSelectedModel)"
+                >
+                  {{ switchingHomeModel ? '保存中...' : '切换首页模型' }}
+                </button>
+                <span class="status-label" style="align-self:flex-end;padding-bottom:10px;">
+                  当前默认：{{ homeSelectedModel }} / 实际生效：{{ homeEffectiveModel }}
+                </span>
+                <span
+                  v-if="homeModelMessage"
+                  class="status-label"
+                  style="align-self:flex-end;padding-bottom:10px;color:var(--color-success)"
+                >
+                  {{ homeModelMessage }}
+                </span>
               </div>
             </div>
 
@@ -93,23 +129,24 @@
             <div class="card">
               <h3 class="card-title">设备上报轮播（异常高亮）</h3>
               <div v-if="tickerItems.length" class="ticker-panel">
-                <div class="ticker-current" :class="{ anomaly: tickerCurrent?.is_anomaly }">
+                <div class="ticker-current" :class="{ anomaly: triStateTone(tickerCurrent) === 'danger' }">
                   <div class="ticker-dev table-link cursor-pointer" @click="goToDeviceFromTicker(tickerCurrent)">{{ tickerCurrent?.dev_num }}</div>
                   <div class="ticker-meta">
-                    <span :class="['badge', tickerCurrent?.is_anomaly ? 'badge-anomaly' : 'badge-ok']">
-                      {{ tickerCurrent?.is_anomaly ? '异常' : '正常' }}
+                    <span :class="['badge', triStateBadgeClass(tickerCurrent)]">
+                      {{ triStateLabel(tickerCurrent) }}
                     </span>
                     <span class="ticker-time">{{ formatTime(tickerCurrent?.device_timestamp) }}</span>
                   </div>
-                  <div class="ticker-sub">{{ tickerCurrent?.model_name }} | {{ tickerCurrent?.status }}</div>
+                  <div class="ticker-sub">{{ tickerCurrent?.model_name }} | {{ tickerCurrent?.status_label || tickerCurrent?.status }}</div>
                 </div>
 
                 <div class="ticker-list">
                   <div class="ticker-row" v-for="(item, idx) in tickerItems.slice(0, 12)" :key="item.dev_num + '_' + idx">
                     <button class="ticker-row-dev table-link cursor-pointer" @click="goToDeviceFromTicker(item)">{{ item.dev_num }}</button>
-                    <span :class="['badge', item.is_anomaly ? 'badge-anomaly' : 'badge-ok']">
-                      {{ item.is_anomaly ? '异常' : '正常' }}
+                    <span :class="['badge', triStateBadgeClass(item)]">
+                      {{ triStateLabel(item) }}
                     </span>
+                    <span class="status-label" style="margin-left:8px;">{{ item.status_short || item.status_label || item.status }}</span>
                   </div>
                 </div>
               </div>
@@ -179,6 +216,93 @@
           </div>
         </div>
 
+        <div class="card">
+          <h3 class="card-title">模型对比回放（只读，不落库）</h3>
+          <div class="device-input-row">
+            <div class="form-group">
+              <label>对比小时数</label>
+              <input class="input" v-model.number="compareHours" type="number" min="1" max="8760" />
+            </div>
+            <div class="form-group">
+              <label>区间来源</label>
+              <select class="model-select" v-model="compareRangeMode">
+                <option value="hours">按对比小时数</option>
+                <option value="current">使用当前查询区间</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>最大扫描点</label>
+              <input class="input" v-model.number="compareMaxScanPoints" type="number" min="20" max="300" />
+            </div>
+            <button class="btn-primary cursor-pointer" @click="runDeviceModelCompare" :disabled="comparingModels || !queryDev.trim()">
+              {{ comparingModels ? '对比中...' : '执行模型对比' }}
+            </button>
+          </div>
+          <div class="status-label" style="margin-top:-8px;margin-bottom:8px;color:var(--color-text-muted);">
+            建议默认按“对比小时数”做模型评估；若要对齐当前曲线视图，可切换为“使用当前查询区间”。结果仅用于分析，不写入实时检测与故障档案，仅记录在模型响应日志中。
+          </div>
+          <div class="device-input-row" style="gap:14px;flex-wrap:wrap;margin-bottom:6px;">
+            <label
+              v-for="m in compareModelOptions"
+              :key="`cmp_${m.model_name}`"
+              class="status-label"
+              style="display:flex;align-items:center;gap:6px;padding-bottom:0;cursor:pointer;"
+            >
+              <input
+                type="checkbox"
+                :checked="compareSelectedModels.includes(m.model_name)"
+                @change="toggleCompareModel(m.model_name, $event.target.checked)"
+              />
+              <span>{{ m.model_name }}</span>
+            </label>
+          </div>
+          <div v-if="deviceModelCompareMessage" class="status-label" style="color:var(--color-warning);margin-top:4px;">
+            {{ deviceModelCompareMessage }}
+          </div>
+          <div v-if="deviceModelCompareResult?.results?.length" class="device-input-row" style="margin-top:8px;margin-bottom:0;">
+            <div class="form-group">
+              <label>图表预览模型</label>
+              <select class="model-select" v-model="comparePreviewModelName">
+                <option value="">实时结果（默认）</option>
+                <option v-for="row in comparePreviewOptions" :key="`cmp_preview_${row.model_name}`" :value="row.model_name">
+                  {{ row.model_name }}
+                </option>
+              </select>
+            </div>
+            <button class="nav-tab cursor-pointer" @click="clearComparePreview">恢复实时结果</button>
+          </div>
+          <div v-if="deviceModelCompareResult?.results?.length" class="admin-table-wrap" style="margin-top:10px;">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>模型</th>
+                  <th>扫描点</th>
+                  <th>异常点</th>
+                  <th>异常标记</th>
+                  <th>最新状态</th>
+                  <th>最新分数</th>
+                  <th>耗时</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in deviceModelCompareResult.results"
+                  :key="`cmp_row_${row.model_name}`"
+                  :style="comparePreviewModelName === row.model_name ? 'background: rgba(34,197,94,0.08);' : ''"
+                >
+                  <td>{{ row.model_name }} / {{ row.effective_model_name }}</td>
+                  <td>{{ row.summary?.scan_count ?? '--' }}</td>
+                  <td>{{ row.summary?.anomaly_count ?? '--' }}</td>
+                  <td>{{ row.summary?.mark_count ?? '--' }}</td>
+                  <td>{{ row.latest_detection?.status_label || row.latest_detection?.status || row.skip_reason || '--' }}</td>
+                  <td>{{ row.latest_detection?.anomaly_score != null ? Number(row.latest_detection.anomaly_score).toFixed(4) : '--' }}</td>
+                  <td>{{ row.summary?.elapsed_ms ?? '--' }}ms</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div v-if="deviceData" class="card">
           <div class="status-bar">
             <div class="status-item"><span class="status-label">设备</span><span class="status-value">{{ deviceData.dev_num }}</span></div>
@@ -198,18 +322,30 @@
               <span class="status-label">扫描窗口</span>
               <span class="status-value">{{ deviceData.range.scan_points }}</span>
             </div>
-            <div v-if="deviceData?.marks?.length" class="status-item">
+            <div v-if="deviceData?.scan_summary?.abnormal_window_count > 0" class="status-item">
+              <span class="status-label">异常窗口</span>
+              <span class="status-value">{{ deviceData.scan_summary.abnormal_window_count }} / {{ deviceData.scan_summary.window_count }}</span>
+            </div>
+            <div v-else-if="deviceData?.scan_summary?.window_count" class="status-item">
+              <span class="status-label">异常窗口</span>
+              <span class="status-value">0 / {{ deviceData.scan_summary.window_count }}</span>
+            </div>
+            <div v-if="uploadResult?.data?.summary?.elapsed_ms" class="status-item">
+              <span class="status-label">分析耗时</span>
+              <span class="status-value">{{ uploadResult.data.summary.elapsed_ms }} ms</span>
+            </div>
+            <div v-if="deviceChartMarks?.length" class="status-item">
               <span class="status-label">图中标记</span>
-              <span class="status-value">{{ deviceData.marks.length }}</span>
+              <span class="status-value">{{ deviceChartMarks.length }}</span>
             </div>
             <div class="status-item">
               <span class="status-label">最新检测</span>
               <span class="status-value">
                 <span
                   v-if="deviceData?.latest_detection"
-                  :class="['badge', deviceData.latest_detection.is_anomaly ? 'badge-anomaly' : 'badge-ok']"
+                  :class="['badge', triStateBadgeClass(deviceData.latest_detection)]"
                 >
-                  {{ deviceData.latest_detection.is_anomaly ? '异常' : '正常' }}
+                  {{ triStateLabel(deviceData.latest_detection) }}
                 </span>
                 <span v-else class="badge badge-muted">--</span>
               </span>
@@ -218,8 +354,45 @@
               <span class="status-label">最新状态</span>
               <span class="status-value">{{ deviceData.latest_detection.status_label }}</span>
             </div>
+            <div v-if="deviceData?.latest_detection?.label" class="status-item">
+              <span class="status-label">原始标签</span>
+              <span class="status-value">{{ deviceData.latest_detection.label }}</span>
+            </div>
+            <div v-if="deviceData?.latest_detection?.condition" class="status-item">
+              <span class="status-label">路由工况</span>
+              <span class="status-value">{{ deviceData.latest_detection.condition }}</span>
+            </div>
+            <div v-if="deviceData?.latest_detection?.routed_model" class="status-item">
+              <span class="status-label">子模型</span>
+              <span class="status-value">{{ deviceData.latest_detection.routed_model }}</span>
+            </div>
+            <div v-if="deviceData?.latest_detection?.error_detail" class="status-item" style="min-width:320px;">
+              <span class="status-label">异常原因</span>
+              <span class="status-value" style="white-space:normal;word-break:break-word;">{{ deviceData.latest_detection.error_detail }}</span>
+            </div>
+            <div v-if="deviceData?.scan_summary?.first_abnormal_window_ts" class="status-item">
+              <span class="status-label">首个异常窗</span>
+              <span class="status-value">{{ formatTime(deviceData.scan_summary.first_abnormal_window_ts) }}</span>
+            </div>
+            <div v-if="deviceData?.scan_summary?.last_abnormal_window_ts" class="status-item">
+              <span class="status-label">最后异常窗</span>
+              <span class="status-value">{{ formatTime(deviceData.scan_summary.last_abnormal_window_ts) }}</span>
+            </div>
+            <div v-if="deviceTransitionEvent" class="status-item">
+              <span class="status-label">转移事件</span>
+              <span class="status-value">{{ formatTime(deviceTransitionEvent.event_start_ts) }} -> {{ formatTime(deviceTransitionEvent.peak_time_ts) }} -> {{ formatTime(deviceTransitionEvent.event_end_ts) }}</span>
+            </div>
           </div>
-          <TrendChart :series="deviceData.series" :marks="deviceData.marks" :show-zoom="true" />
+          <TrendChart :series="deviceData.series" :marks="deviceChartMarks" :show-zoom="true" />
+          <div class="status-label" style="margin-top:10px;color:var(--color-text-muted);">
+            {{ deviceChartMarkSourceText }}
+          </div>
+          <div v-if="deviceChartMarks?.length > 10" class="status-label" style="margin-top:10px;color:var(--color-text-muted);">
+            图中仅保留最近少量关键标注，完整异常时间请以下方摘要和悬浮提示为准。
+          </div>
+          <div v-if="deviceScanSummaryText" class="status-label" style="margin-top:10px;color:var(--color-text-muted);">
+            {{ deviceScanSummaryText }}
+          </div>
           <div v-if="deviceMarkPreview.length" class="mark-chip-panel">
             <div class="status-label">图中标记摘要（最近 {{ deviceMarkPreview.length }} 条）</div>
             <div class="mark-chip-list">
@@ -233,6 +406,100 @@
       </section>
 
       <section v-if="page === 'admin'">
+        <div class="card">
+          <h3 class="card-title">模型响应分析（模型评估）</h3>
+          <div class="status-bar admin-toolbar">
+            <div class="status-item">
+              <span class="status-label">来源</span>
+              <select class="model-select" v-model="analysisSource">
+                <option value="all">全部</option>
+                <option value="online">实时</option>
+                <option value="replay">回放</option>
+                <option value="compare">对比</option>
+                <option value="upload">上传</option>
+              </select>
+            </div>
+            <div class="status-item">
+              <span class="status-label">统计小时</span>
+              <input class="input admin-jump-input" v-model.number="analysisHours" type="number" min="1" max="8760" />
+            </div>
+            <div class="status-item">
+              <span class="status-label">设备号过滤</span>
+              <input class="input admin-search-input" v-model="analysisDevKeyword" placeholder="可选设备号关键字" />
+            </div>
+            <div class="status-item">
+              <span class="status-label">操作</span>
+              <button class="btn-primary cursor-pointer" :disabled="analysisLoading" @click="loadModelResponseInsights">
+                {{ analysisLoading ? '加载中...' : '刷新分析' }}
+              </button>
+            </div>
+          </div>
+          <div class="status-label" style="margin-top:-8px;margin-bottom:10px;color:var(--color-text-muted);">
+            汇总展示所有响应；下方明细默认仅展示异常响应，便于快速做模型效果复盘。
+          </div>
+          <div v-if="analysisMessage" class="status-label" style="margin-top:-8px;margin-bottom:10px;color:var(--color-warning);">
+            {{ analysisMessage }}
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>模型</th>
+                  <th>总响应</th>
+                  <th>异常数</th>
+                  <th>异常率</th>
+                  <th>平均分</th>
+                  <th>最高分</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in analysisSummaryRows" :key="`analysis_summary_${row.model_name}`">
+                  <td>{{ row.model_name || '--' }}</td>
+                  <td>{{ row.total_count ?? 0 }}</td>
+                  <td>{{ row.anomaly_count ?? 0 }}</td>
+                  <td>{{ Number(row.anomaly_rate || 0).toFixed(2) }}%</td>
+                  <td>{{ row.avg_score != null ? Number(row.avg_score).toFixed(4) : '--' }}</td>
+                  <td>{{ row.max_score != null ? Number(row.max_score).toFixed(4) : '--' }}</td>
+                </tr>
+                <tr v-if="!analysisSummaryRows.length">
+                  <td colspan="6" class="admin-empty">暂无模型响应汇总数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="admin-table-wrap" style="margin-top:10px;">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>检测时间</th>
+                  <th>设备</th>
+                  <th>来源</th>
+                  <th>请求模型</th>
+                  <th>状态</th>
+                  <th>分数</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in analysisRecentAnomalies" :key="`analysis_recent_${row.run_id}_${row.dev_num}_${row.device_timestamp}`">
+                  <td>{{ formatTime(row.device_timestamp) }}</td>
+                  <td>{{ row.dev_num }}</td>
+                  <td>{{ row.source || '--' }}</td>
+                  <td>{{ row.requested_model_name || '--' }}</td>
+                  <td>
+                    <button class="status-text-btn cursor-pointer" @click="openAnomalyDetail(row, 'analysis_recent')">
+                      {{ row.status_label || row.status || '--' }}
+                    </button>
+                  </td>
+                  <td>{{ row.anomaly_score != null ? Number(row.anomaly_score).toFixed(4) : '--' }}</td>
+                </tr>
+                <tr v-if="!analysisRecentAnomalies.length">
+                  <td colspan="6" class="admin-empty">暂无异常响应明细</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="card">
           <div class="status-bar admin-toolbar">
             <div class="status-item"><span class="status-label">总条数</span><span class="status-value">{{ adminTotal }}</span></div>
@@ -273,6 +540,9 @@
             </div>
             <div class="status-item"><span class="status-label">操作</span><button class="btn-primary cursor-pointer" @click="searchAdminByDevice">查询</button></div>
           </div>
+          <div class="status-label" style="margin-top:-8px;margin-bottom:10px;color:var(--color-text-muted);">
+            点击“状态”或“执行状态”可查看该条电机异常的详细解释与排查建议。
+          </div>
 
           <div class="admin-table-wrap">
             <table class="admin-table">
@@ -294,12 +564,18 @@
                   </td>
                   <td>{{ formatTime(row.device_timestamp) }}</td>
                   <td>
-                    <span :class="['badge', row.is_anomaly ? 'badge-anomaly' : 'badge-ok']">{{ row.is_anomaly ? '异常' : '正常' }}</span>
+                    <button class="status-chip-btn cursor-pointer" @click="openAnomalyDetail(row, 'admin_recent')">
+                      <span :class="['badge', triStateBadgeClass(row)]">{{ triStateLabel(row) }}</span>
+                    </button>
                   </td>
                   <td>{{ row.model_name || '--' }}</td>
                   <td>{{ Number(row.anomaly_score || 0).toFixed(4) }}</td>
                   <td>{{ row.infer_latency_ms ?? '--' }}ms</td>
-                  <td>{{ row.status || '--' }}</td>
+                  <td>
+                    <button class="status-text-btn cursor-pointer" @click="openAnomalyDetail(row, 'admin_recent')">
+                      {{ row.status_label || row.status || '--' }}
+                    </button>
+                  </td>
                 </tr>
                 <tr v-if="!adminRecent.length">
                   <td colspan="7" class="admin-empty">暂无匹配数据</td>
@@ -353,6 +629,7 @@
               <select class="model-select" v-model="replayModelName">
                 <option value="auto">auto</option>
                 <option value="seal_v4">seal_v4</option>
+                <option value="salad_gru" :disabled="!isModelEnabled('salad_gru')">salad_gru</option>
                 <option value="xgboost">xgboost</option>
                 <option value="gru">gru</option>
               </select>
@@ -376,6 +653,7 @@
               <select class="model-select" v-model="uploadModelName">
                 <option value="seal_v4">seal_v4</option>
                 <option value="auto">auto</option>
+                <option value="salad_gru" :disabled="!isModelEnabled('salad_gru')">salad_gru</option>
                 <option value="xgboost" :disabled="!isModelEnabled('xgboost')">xgboost</option>
                 <option value="gru" :disabled="!isModelEnabled('gru')">gru</option>
               </select>
@@ -400,6 +678,86 @@
         </div>
 
         <div class="card">
+          <h3 class="card-title">新数据复核收口执行</h3>
+          <div class="device-input-row">
+            <div class="form-group">
+              <label>说明 Excel</label>
+              <input class="input" v-model="reviewFinalizeReadmeXlsx" placeholder="/Users/xpker/Downloads/data_readme.xlsx" />
+            </div>
+            <div class="form-group">
+              <label>段清单 CSV</label>
+              <input class="input" v-model="reviewFinalizeManifestCsv" placeholder="reports/.../segment_pipeline_manifest.csv" />
+            </div>
+            <div class="form-group">
+              <label>支撑结果 CSV</label>
+              <input class="input" v-model="reviewFinalizeSupportCsv" placeholder="reports/.../segment_support_output_v3.csv" />
+            </div>
+          </div>
+          <div class="device-input-row">
+            <div class="form-group">
+              <label>复核队列 CSV</label>
+              <input class="input" v-model="reviewFinalizeQueueCsv" placeholder="reports/.../segment_review_queue_v3.csv" />
+            </div>
+            <div class="form-group">
+              <label>工作标签 CSV</label>
+              <input class="input" v-model="reviewFinalizeLabelsCsv" placeholder="reports/.../segment_review_labels_working_v2.csv" />
+            </div>
+            <div class="form-group">
+              <label>自动种子 CSV</label>
+              <input class="input" v-model="reviewFinalizeAutoSeedCsv" placeholder="reports/.../segment_review_labels_auto_seed_v2.csv" />
+            </div>
+          </div>
+          <div class="device-input-row">
+            <div class="form-group" style="flex:1 1 520px;">
+              <label>输出目录</label>
+              <input class="input" v-model="reviewFinalizeOutputDir" placeholder="reports/new_data_review_finalize_v1_run1" />
+            </div>
+            <button class="btn-primary" @click="loadReviewFinalizeDefaults" :disabled="reviewFinalizeSubmitting">
+              载入默认路径
+            </button>
+            <button class="btn-primary" @click="submitReviewFinalize" :disabled="reviewFinalizeSubmitting">
+              {{ reviewFinalizeSubmitting ? '执行中...' : '执行复核收口' }}
+            </button>
+          </div>
+          <div v-if="reviewFinalizeFileStatus.length" class="event-list" style="margin-top:-4px;margin-bottom:12px;">
+            <div class="event-row" v-for="item in reviewFinalizeFileStatus" :key="item.key">
+              <span>{{ item.label }}</span>
+              <span :class="['badge', item.exists ? 'badge-ok' : 'badge-warning']">{{ item.exists ? '已找到' : '未找到' }}</span>
+              <span style="color:var(--color-text-muted)">{{ item.path }}</span>
+            </div>
+          </div>
+          <div class="status-label" style="margin-top:-8px;margin-bottom:12px;color:var(--color-text-muted);">
+            作用：读取人工编辑后的 `segment_review_labels_working_v2.csv`，自动回灌并刷新 pending 与调优建议。
+          </div>
+          <div v-if="reviewFinalizeMessage" class="status-label" style="color:var(--color-warning);margin-top:-8px;margin-bottom:12px;">{{ reviewFinalizeMessage }}</div>
+          <div v-if="reviewFinalizeExplanation" ref="reviewFinalizeExplanationRef" class="card" style="margin-top:12px;border:1px solid var(--color-border);">
+            <h3 class="card-title">复核收口结果说明</h3>
+            <div class="status-bar">
+              <div class="status-item"><span class="status-label">已填标签</span><span class="status-value">{{ reviewFinalizeExplanation.filledRows }}</span></div>
+              <div class="status-item"><span class="status-label">人工填写</span><span class="status-value">{{ reviewFinalizeExplanation.manualRows }}</span></div>
+              <div class="status-item"><span class="status-label">当前 pending</span><span class="status-value">{{ reviewFinalizeExplanation.pendingSegments }}</span></div>
+              <div class="status-item"><span class="status-label">Transition 主段</span><span class="status-value">{{ reviewFinalizeExplanation.transitionPrimaryCount }}</span></div>
+            </div>
+            <div class="event-list" style="margin-top:12px;">
+              <div class="event-row"><span>当前在做什么</span><span style="color:var(--color-text-muted)">{{ reviewFinalizeExplanation.currentAction }}</span></div>
+              <div class="event-row"><span>下一步</span><span style="color:var(--color-text-muted)">{{ reviewFinalizeExplanation.nextAction }}</span></div>
+              <div class="event-row" v-for="item in reviewFinalizeExplanation.pendingItems" :key="item.segment_id">
+                <span>{{ item.segment_id }}</span>
+                <span style="color:var(--color-text-muted)">{{ item.support_status_v3 }} | memory={{ item.memory_role_v2 ?? 'none' }}</span>
+              </div>
+            </div>
+            <div class="status-label" style="margin-top:12px;">关键输出文件</div>
+            <div class="event-list">
+              <div class="event-row" v-for="item in reviewFinalizeExplanation.outputItems" :key="item.label">
+                <span>{{ item.label }}</span>
+                <span style="color:var(--color-text-muted)">{{ item.path }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="reviewFinalizeResult" class="json-box">{{ JSON.stringify(reviewFinalizeResult, null, 2) }}</div>
+        </div>
+
+        <div class="card">
           <h3 class="card-title">运行指标</h3>
           <button class="btn-primary" @click="loadRuntimeMetrics" style="margin-bottom:var(--space-md)">刷新指标</button>
           <div v-if="metricsData" class="json-box">{{ JSON.stringify(metricsData, null, 2) }}</div>
@@ -411,8 +769,8 @@
           <div class="event-list">
             <div class="event-row" v-for="(e, i) in diagEvents" :key="i">
               <span>{{ e.dev_num }}</span>
-              <span :class="['badge', e.detection?.is_anomaly ? 'badge-anomaly' : 'badge-ok']">{{ e.detection?.is_anomaly ? '异常' : '正常' }}</span>
-              <span style="color:var(--color-text-muted)">{{ e.detection?.model_name }} | {{ e.method }} | {{ e.detection?.status }}</span>
+              <span :class="['badge', triStateBadgeClass(e.detection)]">{{ triStateLabel(e.detection) }}</span>
+              <span style="color:var(--color-text-muted)">{{ e.detection?.model_name }} | {{ e.method }} | {{ e.detection?.status_label || e.detection?.status }}</span>
               <span style="color:var(--color-text-muted)">异常点: {{ (e.anomaly_points || []).length }}</span>
             </div>
           </div>
@@ -424,8 +782,8 @@
             <div class="event-row" v-for="row in recentFaults" :key="row.request_id + '_' + row.device_timestamp">
               <span>{{ row.dev_num }}</span>
               <span>{{ formatTime(row.device_timestamp) }}</span>
-              <span :class="['badge', row.is_anomaly ? 'badge-anomaly' : 'badge-ok']">{{ row.is_anomaly ? '异常' : '正常' }}</span>
-              <span style="color:var(--color-text-muted)">{{ row.model_name }} | {{ row.method }} | {{ row.diagnosis_status }}</span>
+              <span :class="['badge', triStateBadgeClass(row)]">{{ triStateLabel(row) }}</span>
+              <span style="color:var(--color-text-muted)">{{ row.model_name }} | {{ row.method }} | {{ row.status_label || row.diagnosis_status }}</span>
             </div>
           </div>
           <div v-else class="no-data">暂无故障档案数据</div>
@@ -471,18 +829,59 @@
         </div>
       </div>
     </div>
+
+    <div v-if="showAnomalyDetailModal" class="modal-mask" @click.self="closeAnomalyDetail">
+      <div class="modal-card anomaly-detail-card">
+        <div class="modal-header">
+          <h3>{{ anomalyDetailTitle }}</h3>
+          <button class="nav-tab cursor-pointer" @click="closeAnomalyDetail">关闭</button>
+        </div>
+        <div class="status-bar">
+          <div class="status-item">
+            <span class="status-label">判定级别</span>
+            <span class="status-value">
+              <span :class="['badge', triStateBadgeClass(anomalyDetailRow)]">{{ triStateLabel(anomalyDetailRow) }}</span>
+            </span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">执行状态</span>
+            <span class="status-value">{{ anomalyDetailRow?.status_label || anomalyDetailRow?.status || '--' }}</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">异常分数</span>
+            <span class="status-value">{{ formatFixed(anomalyDetailRow?.anomaly_score, 4) }}</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">阈值</span>
+            <span class="status-value">{{ formatFixed(anomalyDetailRow?.threshold, 4) }}</span>
+          </div>
+        </div>
+        <div class="status-label" style="margin-top:12px;color:var(--color-text-muted);">
+          {{ anomalyDetailGuidance }}
+        </div>
+        <div class="event-list" style="max-height:420px;margin-top:10px;">
+          <div class="event-row" v-for="item in anomalyDetailItems" :key="item.label">
+            <span>{{ item.label }}</span>
+            <span class="detail-value">{{ item.value }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import TrendChart from './components/TrendChart.vue'
 import {
+  compareDeviceModels,
   createDiagSSE,
   createHomeSSE,
   fetchAdminRecent,
   buildFaultRecentExportUrl,
   fetchFaultRecent,
+  fetchModelResponseRecent,
+  fetchModelResponseSummary,
   fetchDeviceAnomalies,
   fetchDeviceCurve,
   fetchDeviceIds,
@@ -495,7 +894,10 @@ import {
   fetchHomeDeviceTicker,
   fetchModels,
   fetchRuntimeMetrics,
+  fetchNewDataReviewConfig,
+  finalizeNewDataReviewWorkflow,
   rollbackModelVersion,
+  selectModel,
   selectDeviceModel,
   startDiagnosisReplay,
   triggerProcess,
@@ -519,15 +921,27 @@ const triggerTs = ref('')
 const triggering = ref(false)
 const triggerResult = ref(null)
 
-const queryDev = ref('000000020165453')
+const queryDev = ref('')
 const queryHours = ref(48)
 const querying = ref(false)
 const deviceData = ref(null)
 const deviceQueryMessage = ref('')
+const comparingModels = ref(false)
+const deviceModelCompareMessage = ref('')
+const deviceModelCompareResult = ref(null)
+const compareHours = ref(48)
+const compareRangeMode = ref('hours')
+const compareMaxScanPoints = ref(120)
+const compareSelectedModels = ref([])
+const comparePreviewModelName = ref('')
 
 const availableModels = ref([])
 const modelServiceAvailable = ref(true)
 const modelServiceMessage = ref('')
+const homeSelectedModel = ref('auto')
+const homeEffectiveModel = ref('auto')
+const switchingHomeModel = ref(false)
+const homeModelMessage = ref('')
 const deviceSelectedModel = ref('none')
 const switchingDeviceModel = ref(false)
 const deviceModelSource = ref('default')
@@ -555,7 +969,17 @@ const adminJumpPage = ref(1)
 const adminPageSize = ref(50)
 const adminTotal = ref(0)
 const adminTotalPages = computed(() => Math.max(1, Math.ceil(adminTotal.value / adminPageSize.value)))
-const rollbackModelCatalog = computed(() => modelCatalog.value.filter((x) => x.model_name !== 'auto' && x.model_name !== 'seal_v4' && x.enabled))
+const analysisSource = ref('all')
+const analysisHours = ref(72)
+const analysisDevKeyword = ref('')
+const analysisLoading = ref(false)
+const analysisMessage = ref('')
+const analysisSummaryRows = ref([])
+const analysisRecentAnomalies = ref([])
+const showAnomalyDetailModal = ref(false)
+const anomalyDetailRow = ref(null)
+const anomalyDetailSource = ref('')
+const rollbackModelCatalog = computed(() => modelCatalog.value.filter((x) => x.rollback_supported && x.enabled))
 const rollbackVersions = computed(() => {
   const model = rollbackModelCatalog.value.find((x) => x.model_name === rollbackModelName.value)
   return model?.versions || []
@@ -582,6 +1006,23 @@ const rollbackModelName = ref('xgboost')
 const rollbackTargetVersion = ref('')
 let diagSSE = null
 const selectedDeviceModelConfig = computed(() => modelCatalog.value.find((x) => x.model_name === deviceSelectedModel.value) || null)
+const compareModelOptions = computed(() => modelCatalog.value.filter((x) => x.enabled && x.model_name !== 'none'))
+const comparePreviewOptions = computed(() => (deviceModelCompareResult.value?.results || []).filter((x) => x.available))
+const comparePreviewRow = computed(() => {
+  const modelName = String(comparePreviewModelName.value || '').trim()
+  if (!modelName) return null
+  return (deviceModelCompareResult.value?.results || []).find((x) => x.model_name === modelName) || null
+})
+const deviceChartMarks = computed(() => {
+  if (comparePreviewRow.value?.marks?.length) return comparePreviewRow.value.marks
+  return Array.isArray(deviceData.value?.marks) ? deviceData.value.marks : []
+})
+const deviceChartMarkSourceText = computed(() => {
+  if (comparePreviewRow.value?.model_name) {
+    return `当前图表标记来源：对比模型 ${comparePreviewRow.value.model_name}`
+  }
+  return '当前图表标记来源：实时检测结果'
+})
 const selectedDeviceModelEnabled = computed(() => {
   if (deviceSelectedModel.value === 'none') return true
   return !!selectedDeviceModelConfig.value?.enabled
@@ -593,17 +1034,167 @@ const uploadProcessMode = ref('full')
 const uploadingXlsx = ref(false)
 const uploadResult = ref(null)
 const uploadMessage = ref('')
+const reviewFinalizeReadmeXlsx = ref('/Users/xpker/Downloads/data_readme.xlsx')
+const reviewFinalizeManifestCsv = ref('reports/new_data_segment_pipeline_v1_run1/segment_pipeline_manifest.csv')
+const reviewFinalizeSupportCsv = ref('reports/new_data_segment_static_support_v3_run1/segment_support_output_v3.csv')
+const reviewFinalizeQueueCsv = ref('reports/new_data_segment_static_support_v3_run1/segment_review_queue_v3.csv')
+const reviewFinalizeLabelsCsv = ref('reports/new_data_review_workflow_v1_run1/segment_review_labels_working_v2.csv')
+const reviewFinalizeAutoSeedCsv = ref('reports/new_data_segment_auto_seed_labels_v2_run1/segment_review_labels_auto_seed_v2.csv')
+const reviewFinalizeOutputDir = ref('reports/new_data_review_finalize_v1_run1')
+const reviewFinalizeSubmitting = ref(false)
+const reviewFinalizeResult = ref(null)
+const reviewFinalizeMessage = ref('')
+const reviewFinalizeConfig = ref(null)
+const reviewFinalizeExplanationRef = ref(null)
 const deviceMarkPreview = computed(() => {
-  const marks = Array.isArray(deviceData.value?.marks) ? [...deviceData.value.marks] : []
+  const marks = Array.isArray(deviceChartMarks.value) ? [...deviceChartMarks.value] : []
   return marks
     .sort((a, b) => Number(b.display_mark_ts || 0) - Number(a.display_mark_ts || 0))
     .slice(0, 8)
 })
+const deviceTransitionEvent = computed(() => deviceData.value?.latest_detection?.transition_event || null)
+const deviceScanSummaryText = computed(() => {
+  const summary = deviceData.value?.scan_summary
+  if (!summary?.window_count) return ''
+  const counts = summary.abnormal_label_counts || {}
+  const labelText = Object.entries(counts)
+    .map(([label, count]) => `${label}: ${count}`)
+    .join('，')
+  const base = `SALAD 滑窗：${summary.window_hours}h 窗口 / ${summary.step_hours}h 步进，异常窗口 ${summary.abnormal_window_count}/${summary.window_count}`
+  return labelText ? `${base}（${labelText}）` : base
+})
+const reviewFinalizeFileStatus = computed(() => {
+  const fileStatus = reviewFinalizeConfig.value?.file_status || {}
+  const labels = {
+    readme_xlsx: '说明 Excel',
+    segment_manifest_csv: '段清单 CSV',
+    segment_support_csv: '支撑结果 CSV',
+    review_queue_csv: '复核队列 CSV',
+    working_labels_csv: '工作标签 CSV',
+    auto_seed_csv: '自动种子 CSV',
+    output_dir: '输出目录',
+  }
+  return Object.entries(fileStatus).map(([key, meta]) => ({
+    key,
+    label: labels[key] || key,
+    path: meta?.path || '--',
+    exists: !!meta?.exists,
+    isDir: !!meta?.is_dir,
+  }))
+})
+const reviewFinalizeExplanation = computed(() => {
+  const data = reviewFinalizeResult.value?.data
+  const summary = data?.summary || {}
+  const feedback = summary?.feedback_summary || {}
+  const tuning = summary?.tuning_summary || {}
+  const outputs = data?.outputs || {}
+  if (!reviewFinalizeResult.value || reviewFinalizeResult.value.code !== 0) return null
+  return {
+    filledRows: summary?.filled_rows ?? '--',
+    manualRows: summary?.manual_rows ?? '--',
+    pendingSegments: feedback?.pending_segments ?? '--',
+    transitionPrimaryCount: tuning?.transition_primary_segment_count ?? '--',
+    currentAction: '把人工复核结果重新回灌到段级参考池，并刷新 guarded/pending 排序。',
+    nextAction: (feedback?.pending_segments || 0) > 0
+      ? '继续优先复核 181049 和 transition_secondary_control，暂不重启 whole-run 模型。'
+      : '当前 pending 已清空，可以进入下一轮段级基准维护或阈值微调。',
+    pendingItems: feedback?.top_pending_segments || [],
+    outputItems: [
+      { label: '收口报告', path: outputs?.finalize_report_md || '--' },
+      { label: 'Pending 重排', path: outputs?.pending_csv || '--' },
+      { label: '调优建议', path: outputs?.tuning_report_md || '--' },
+      { label: '标签快照', path: outputs?.snapshot_csv || '--' },
+    ],
+  }
+})
+
+const STATUS_GUIDANCE_MAP = {
+  transition_boost_alert: '检测到湿度转移增强，建议优先排查密封胶条、线束入口与排水通道。',
+  static_dynamic_supported_alert: '当前高湿响应支持异常，建议结合温湿趋势复核是否持续进湿。',
+  static_dynamic_support_alert: '当前高湿响应支持异常，建议结合温湿趋势复核是否持续进湿。',
+  static_hard_case_watch: '当前为难例观察状态，建议继续积累更多时间窗再复核结论。',
+  static_abstain_low_signal: '当前信号较弱，模型保守判定，建议延长采样窗口后再判断。',
+  heat_related_background: '当前更像热相关背景变化，建议结合外部工况确认。',
+  low_info_background: '当前信息量较低，建议补充更多采样点。',
+  insufficient_data: '当前数据不足，建议确认设备是否持续上报。',
+  insufficient_history_local: '历史窗口不足，建议延长时间范围后重试。',
+  ongoing: '识别为进行中的异常事件，建议尽快现场排查。',
+  no_detection: '未检出异常，但建议结合现场工况持续观察。',
+  salad_low_info: 'SALAD 判定为低信息工况，建议补充更多连续数据。',
+  salad_sealed: 'SALAD 判定密封正常，当前风险较低。',
+  salad_unsealed: 'SALAD 判定密封异常，建议优先排查箱体密封路径。',
+  salad_moisture_ingress: 'SALAD 判定持续进湿，建议检查进湿源与密封完整性。',
+  salad_moisture_accumulation: 'SALAD 判定内部积湿，建议检查冷凝与排湿条件。',
+  salad_unknown: 'SALAD 当前未给出明确结果，建议继续观察或换窗复核。',
+  salad_error: 'SALAD 运行异常，建议检查模型服务与输入数据质量。',
+}
+
+const anomalyDetailTitle = computed(() => {
+  const row = anomalyDetailRow.value || {}
+  return `异常详情：${row.dev_num || '--'}`
+})
+
+const anomalyDetailGuidance = computed(() => {
+  const row = anomalyDetailRow.value || {}
+  const status = String(row.status || row.diagnosis_status || '').trim()
+  if (status && STATUS_GUIDANCE_MAP[status]) return STATUS_GUIDANCE_MAP[status]
+  const risk = String(row.risk_level || '').trim()
+  if (risk === 'high') return '当前为高风险异常，建议先做现场复检，再结合模型回放确认趋势。'
+  if (risk === 'watch') return '当前为观察状态，建议继续跟踪后续数据再下结论。'
+  return '当前结果多为低风险或背景状态，建议结合时间窗持续观察。'
+})
+
+const anomalyDetailItems = computed(() => {
+  const row = anomalyDetailRow.value || {}
+  const source = row.source || (anomalyDetailSource.value === 'admin_recent' ? 'online' : '--')
+  return [
+    { label: '设备号', value: row.dev_num || '--' },
+    { label: '检测时间', value: formatTime(row.device_timestamp) },
+    { label: '来源', value: source },
+    { label: '请求模型', value: row.requested_model_name || row.model_name || '--' },
+    { label: '生效模型', value: row.effective_model_name || row.model_name || '--' },
+    { label: '模型版本', value: row.model_version || '--' },
+    { label: '执行状态代码', value: row.status || row.diagnosis_status || '--' },
+    { label: '执行状态展示', value: row.status_label || row.status_short || row.status || '--' },
+    { label: '风险级别', value: row.risk_level || '--' },
+    { label: '分数', value: formatFixed(row.anomaly_score, 4) },
+    { label: '阈值', value: formatFixed(row.threshold, 4) },
+    { label: '耗时', value: row.infer_latency_ms != null ? `${row.infer_latency_ms}ms` : '--' },
+    { label: '请求ID', value: row.request_id || row.run_id || '--' },
+    { label: '运行ID', value: row.run_id || row.request_id || '--' },
+    { label: '错误详情', value: row.error_detail || '--' },
+  ]
+})
+
+async function loadReviewFinalizeDefaults() {
+  try {
+    const r = await fetchNewDataReviewConfig()
+    reviewFinalizeConfig.value = r.code === 0 ? r.data : null
+    const defaults = r.data?.defaults || {}
+    if (r.code === 0) {
+      reviewFinalizeReadmeXlsx.value = defaults.readme_xlsx || reviewFinalizeReadmeXlsx.value
+      reviewFinalizeManifestCsv.value = defaults.segment_manifest_csv || reviewFinalizeManifestCsv.value
+      reviewFinalizeSupportCsv.value = defaults.segment_support_csv || reviewFinalizeSupportCsv.value
+      reviewFinalizeQueueCsv.value = defaults.review_queue_csv || reviewFinalizeQueueCsv.value
+      reviewFinalizeLabelsCsv.value = defaults.working_labels_csv || reviewFinalizeLabelsCsv.value
+      reviewFinalizeAutoSeedCsv.value = defaults.auto_seed_csv || reviewFinalizeAutoSeedCsv.value
+      reviewFinalizeOutputDir.value = defaults.output_dir || reviewFinalizeOutputDir.value
+    }
+  } catch {
+    reviewFinalizeConfig.value = null
+  }
+}
 
 function formatTime(ts) {
   if (!ts) return '--'
   const v = ts > 1e12 ? ts : ts * 1000
   return new Date(v).toLocaleString('zh-CN')
+}
+
+function formatFixed(value, digits = 4) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  return num.toFixed(digits)
 }
 
 function badgeClassByTone(item) {
@@ -612,6 +1203,41 @@ function badgeClassByTone(item) {
   if (tone === 'danger' || risk === 'high') return 'badge-anomaly'
   if (tone === 'warning' || risk === 'watch') return 'badge-warning'
   return 'badge-muted'
+}
+
+function triStateTone(item) {
+  const tone = String(item?.tone || '').trim()
+  const risk = String(item?.risk_level || '').trim()
+  const status = String(item?.status || item?.diagnosis_status || '').trim()
+  if (tone === 'danger' || risk === 'high' || item?.is_anomaly) return 'danger'
+  if (tone === 'warning' || risk === 'watch' || status.includes('watch')) return 'warning'
+  return 'ok'
+}
+
+function triStateBadgeClass(item) {
+  const tone = triStateTone(item)
+  if (tone === 'danger') return 'badge-anomaly'
+  if (tone === 'warning') return 'badge-warning'
+  return 'badge-ok'
+}
+
+function triStateLabel(item) {
+  const tone = triStateTone(item)
+  if (tone === 'danger') return '异常'
+  if (tone === 'warning') return '观察'
+  return '正常'
+}
+
+function openAnomalyDetail(row, source = 'admin_recent') {
+  anomalyDetailRow.value = row ? { ...row } : null
+  anomalyDetailSource.value = source
+  showAnomalyDetailModal.value = !!row
+}
+
+function closeAnomalyDetail() {
+  showAnomalyDetailModal.value = false
+  anomalyDetailRow.value = null
+  anomalyDetailSource.value = ''
 }
 
 function readAdminStateFromUrl() {
@@ -702,7 +1328,11 @@ function normalizeTickerEvent(raw) {
     is_anomaly: !!raw.is_anomaly,
     model_name: raw.model_name || '--',
     status: raw.status || '--',
+    status_label: raw.status_label || '',
+    status_short: raw.status_short || '',
     anomaly_score: raw.anomaly_score,
+    risk_level: raw.risk_level || '',
+    tone: raw.tone || '',
   }
 }
 
@@ -787,6 +1417,9 @@ async function doTrigger() {
 async function doQueryDevice(custom = {}) {
   querying.value = true
   deviceQueryMessage.value = ''
+  deviceModelCompareResult.value = null
+  deviceModelCompareMessage.value = ''
+  comparePreviewModelName.value = ''
   try {
     const dev = queryDev.value.trim()
     if (!dev) {
@@ -816,6 +1449,7 @@ async function doQueryDevice(custom = {}) {
     let hours = Number(queryHours.value) || 48
     hours = Math.min(Math.max(1, hours), 8760)
     queryHours.value = hours
+    compareHours.value = hours
 
     const endTs = custom?.endTs || null
     const pointsLimit = custom?.pointsLimit || null
@@ -830,7 +1464,12 @@ async function doQueryDevice(custom = {}) {
 
     if (curveRes.code === 0) {
       deviceData.value = curveRes.data
-      const anomalyRes = await fetchDeviceAnomalies(dev, queryHours.value)
+      const resolvedDev = String(curveRes.data?.dev_num || dev).trim()
+      if (resolvedDev && resolvedDev !== dev) {
+        queryDev.value = resolvedDev
+        deviceQueryMessage.value = `已自动识别设备号：${resolvedDev}`
+      }
+      const anomalyRes = await fetchDeviceAnomalies(resolvedDev, queryHours.value)
       if (anomalyRes.code === 0 && deviceData.value) {
         deviceData.value.marks = anomalyRes.data.items || []
       }
@@ -853,12 +1492,20 @@ async function loadModels() {
     if (r.code === 0) {
       const modelEnabled = !!r.data?.model_service_enabled
       modelServiceAvailable.value = modelEnabled
-      modelServiceMessage.value = modelEnabled ? '' : '当前未提供 xgboost/gru 模型，仍可使用 seal_v4 / auto 进行本地检测'
+      modelServiceMessage.value = modelEnabled ? '' : '当前未提供 xgboost/gru 模型，仍可使用 seal_v4 / salad_gru / auto 进行本地检测'
       const models = r.data?.models || []
       availableModels.value = models.filter((m) => m.enabled)
       modelCatalog.value = models
+      if (!compareSelectedModels.value.length) {
+        compareSelectedModels.value = models
+          .filter((m) => m.enabled && m.model_name !== 'none')
+          .slice(0, 2)
+          .map((m) => m.model_name)
+      }
+      homeSelectedModel.value = r.data?.default_model || homeSelectedModel.value || 'auto'
+      homeEffectiveModel.value = r.data?.effective_model_name || homeSelectedModel.value
 
-      const firstRollbackModel = models.find((m) => m.model_name !== 'auto' && m.model_name !== 'seal_v4' && m.enabled)
+      const firstRollbackModel = models.find((m) => m.rollback_supported && m.enabled)
       if (firstRollbackModel) {
         rollbackModelName.value = firstRollbackModel.model_name
         rollbackTargetVersion.value = firstRollbackModel.active_version || firstRollbackModel.latest_version || ''
@@ -873,13 +1520,46 @@ async function loadModels() {
     modelServiceMessage.value = r.message || '模型目录暂不可用'
     availableModels.value = []
     modelCatalog.value = []
+    homeSelectedModel.value = 'auto'
+    homeEffectiveModel.value = 'auto'
     deviceSelectedModel.value = 'none'
   } catch (err) {
     modelServiceAvailable.value = false
     modelServiceMessage.value = err?.message || '模型服务暂不可用，当前仅支持 none 查询模式'
     availableModels.value = []
     modelCatalog.value = []
+    homeSelectedModel.value = 'auto'
+    homeEffectiveModel.value = 'auto'
     deviceSelectedModel.value = 'none'
+  }
+}
+
+async function saveHomeModel() {
+  if (!isModelEnabled(homeSelectedModel.value)) {
+    homeModelMessage.value = `当前模型 ${homeSelectedModel.value} 不可用`
+    setTimeout(() => {
+      homeModelMessage.value = ''
+    }, 2500)
+    return
+  }
+  switchingHomeModel.value = true
+  homeModelMessage.value = ''
+  try {
+    const r = await selectModel(homeSelectedModel.value)
+    if (r.code === 0) {
+      homeSelectedModel.value = r.data?.default_model || homeSelectedModel.value
+      homeEffectiveModel.value = r.data?.effective_model_name || homeSelectedModel.value
+      homeModelMessage.value = `首页默认模型已切换为 ${homeSelectedModel.value}`
+      setTimeout(() => {
+        homeModelMessage.value = ''
+      }, 2500)
+    } else {
+      homeModelMessage.value = r.message || '首页模型切换失败'
+    }
+  } catch (err) {
+    homeModelMessage.value = err?.message || '首页模型切换异常'
+  } finally {
+    switchingHomeModel.value = false
   }
 }
 
@@ -925,6 +1605,79 @@ async function saveDeviceModel() {
     }
   } finally {
     switchingDeviceModel.value = false
+  }
+}
+
+function toggleCompareModel(modelName, checked) {
+  const current = new Set(compareSelectedModels.value)
+  if (checked) current.add(modelName)
+  else current.delete(modelName)
+  compareSelectedModels.value = Array.from(current)
+}
+
+function clearComparePreview() {
+  comparePreviewModelName.value = ''
+}
+
+async function runDeviceModelCompare() {
+  const dev = queryDev.value.trim()
+  if (!dev) {
+    deviceModelCompareMessage.value = '请先输入设备编号并查询'
+    return
+  }
+  if (!compareSelectedModels.value.length) {
+    deviceModelCompareMessage.value = '请至少选择一个模型'
+    return
+  }
+
+  const fallbackEnd = Date.now()
+  let rangeStart = fallbackEnd - Math.max(1, Number(compareHours.value) || 48) * 3600 * 1000
+  let rangeEnd = fallbackEnd
+  let rangeModeText = `最近 ${Math.max(1, Number(compareHours.value) || 48)} 小时`
+  if (
+    compareRangeMode.value === 'current'
+    && deviceData.value?.range?.start_ts
+    && deviceData.value?.range?.end_ts
+  ) {
+    rangeStart = Number(deviceData.value.range.start_ts)
+    rangeEnd = Number(deviceData.value.range.end_ts)
+    rangeModeText = '当前查询区间'
+  } else if (compareRangeMode.value === 'current') {
+    deviceModelCompareMessage.value = '当前没有可用查询区间，已自动按“对比小时数”窗口执行'
+  }
+
+  comparingModels.value = true
+  if (!deviceModelCompareMessage.value.includes('已自动按“对比小时数”窗口执行')) {
+    deviceModelCompareMessage.value = ''
+  }
+  deviceModelCompareResult.value = null
+  try {
+    const res = await compareDeviceModels({
+      dev_num: dev,
+      start_ts: rangeStart,
+      end_ts: rangeEnd,
+      model_names: compareSelectedModels.value,
+      max_scan_points: Math.max(20, Math.min(300, Number(compareMaxScanPoints.value) || 120)),
+    })
+    if (res.code === 0) {
+      deviceModelCompareResult.value = res.data
+      const resolvedDev = String(res.data?.dev_num || dev).trim()
+      if (resolvedDev && resolvedDev !== dev) {
+        queryDev.value = resolvedDev
+      }
+      const firstAvailable = (res.data?.results || []).find((x) => x.available)
+      comparePreviewModelName.value = firstAvailable?.model_name || ''
+      const count = res.data?.results?.length || 0
+      const scanPoints = res.data?.range?.scan_points ?? '--'
+      const seriesPoints = res.data?.range?.series_points ?? '--'
+      deviceModelCompareMessage.value = `对比完成，共 ${count} 个模型；区间=${rangeModeText}；扫描点=${scanPoints}（原始点=${seriesPoints}）`
+    } else {
+      deviceModelCompareMessage.value = res.message || '模型对比失败'
+    }
+  } catch (err) {
+    deviceModelCompareMessage.value = err?.message || '模型对比异常'
+  } finally {
+    comparingModels.value = false
   }
 }
 
@@ -979,6 +1732,49 @@ async function loadAdminRecent() {
     adminTotal.value = r.data.total || 0
     adminPage.value = r.data.page || adminPage.value
     adminPageSize.value = r.data.page_size || adminPageSize.value
+  }
+}
+
+async function loadModelResponseInsights() {
+  analysisLoading.value = true
+  analysisMessage.value = ''
+  try {
+    const hours = Math.min(Math.max(Number(analysisHours.value) || 72, 1), 8760)
+    analysisHours.value = hours
+    const dev = analysisDevKeyword.value.trim()
+    const source = analysisSource.value || 'all'
+
+    const [summaryRes, recentRes] = await Promise.all([
+      fetchModelResponseSummary(source, hours, dev),
+      fetchModelResponseRecent(200, source, hours, dev, '', true),
+    ])
+
+    if (summaryRes.code === 0) {
+      const rows = summaryRes.data?.items || []
+      analysisSummaryRows.value = rows.map((x) => ({
+        ...x,
+        anomaly_rate: Number(x.anomaly_rate || 0) * 100,
+      }))
+    } else {
+      analysisSummaryRows.value = []
+    }
+
+    if (recentRes.code === 0) {
+      analysisRecentAnomalies.value = recentRes.data?.items || []
+    } else {
+      analysisRecentAnomalies.value = []
+    }
+    if (!analysisSummaryRows.value.length && !analysisRecentAnomalies.value.length) {
+      analysisMessage.value = '当前筛选条件下暂无模型响应数据。请先在“设备查询 > 模型对比回放”执行一次，或等待新的实时检测写入后再刷新。'
+    } else if (!analysisRecentAnomalies.value.length) {
+      analysisMessage.value = '已加载模型响应汇总；当前时间窗内暂无异常响应明细。'
+    }
+  } catch (err) {
+    analysisSummaryRows.value = []
+    analysisRecentAnomalies.value = []
+    analysisMessage.value = `刷新失败：${err?.message || '请检查后端服务是否已更新并重启'}`
+  } finally {
+    analysisLoading.value = false
   }
 }
 
@@ -1067,7 +1863,11 @@ async function submitUploadXlsx() {
       deviceData.value = r.data.detail || null
       deviceQueryMessage.value = `当前展示为上传文件内存分析结果：${r.data.file_name}。如手动重新查询，将切回数据库设备查询。`
       page.value = 'device'
-      uploadMessage.value = `上传成功，已完成内存批量检测：${r.data.dev_num}`
+      if (r.data?.latest_detection?.error_detail) {
+        uploadMessage.value = `上传完成，但 SALAD 返回异常：${r.data.latest_detection.error_detail}`
+      } else {
+        uploadMessage.value = `上传成功，已完成内存批量检测：${r.data.dev_num}`
+      }
     } else {
       uploadMessage.value = r.message || '上传失败'
     }
@@ -1075,6 +1875,37 @@ async function submitUploadXlsx() {
     uploadMessage.value = err?.message || '上传异常'
   } finally {
     uploadingXlsx.value = false
+  }
+}
+
+async function submitReviewFinalize() {
+  reviewFinalizeSubmitting.value = true
+  reviewFinalizeResult.value = null
+  reviewFinalizeMessage.value = ''
+  try {
+    const payload = {
+      readme_xlsx: reviewFinalizeReadmeXlsx.value.trim(),
+      segment_manifest_csv: reviewFinalizeManifestCsv.value.trim(),
+      segment_support_csv: reviewFinalizeSupportCsv.value.trim(),
+      review_queue_csv: reviewFinalizeQueueCsv.value.trim(),
+      working_labels_csv: reviewFinalizeLabelsCsv.value.trim(),
+      auto_seed_csv: reviewFinalizeAutoSeedCsv.value.trim(),
+      output_dir: reviewFinalizeOutputDir.value.trim(),
+    }
+    const r = await finalizeNewDataReviewWorkflow(payload)
+    reviewFinalizeResult.value = r
+    if (r.code === 0) {
+      const pending = r.data?.summary?.feedback_summary?.pending_segments
+      reviewFinalizeMessage.value = `复核收口完成，当前剩余 pending：${pending ?? '--'}`
+      await nextTick()
+      reviewFinalizeExplanationRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else {
+      reviewFinalizeMessage.value = r.message || '复核收口失败'
+    }
+  } catch (err) {
+    reviewFinalizeMessage.value = err?.message || '复核收口异常'
+  } finally {
+    reviewFinalizeSubmitting.value = false
   }
 }
 
@@ -1146,10 +1977,41 @@ watch([deviceSelectedModel, modelCatalog], ([selected]) => {
   }
 })
 
+watch(compareModelOptions, (options) => {
+  const validNames = new Set(options.map((x) => x.model_name))
+  const filtered = compareSelectedModels.value.filter((name) => validNames.has(name))
+  if (filtered.length) {
+    compareSelectedModels.value = filtered
+    return
+  }
+  compareSelectedModels.value = options.slice(0, 2).map((x) => x.model_name)
+})
+
+watch(comparePreviewOptions, (options) => {
+  if (!comparePreviewModelName.value) return
+  const valid = options.some((x) => x.model_name === comparePreviewModelName.value)
+  if (!valid) comparePreviewModelName.value = ''
+})
+
 watch([adminStatusFilter, adminPageSize, adminSortBy, adminSortOrder], async () => {
   adminPage.value = 1
   syncAdminStateToUrl()
   await loadAdminRecent()
+})
+
+watch([analysisSource, analysisHours], async () => {
+  if (page.value !== 'admin') return
+  await loadModelResponseInsights()
+})
+
+watch(page, async (v) => {
+  if (v !== 'admin') {
+    closeAnomalyDetail()
+    return
+  }
+  if (!analysisSummaryRows.value.length && !analysisRecentAnomalies.value.length) {
+    await loadModelResponseInsights()
+  }
 })
 
 watch([page, adminPage, adminJumpPage, adminPageSize, adminStatusFilter, adminSortBy, adminSortOrder, adminDevKeyword], () => {
@@ -1165,10 +2027,12 @@ onMounted(async () => {
   await Promise.all([
     checkHealth(),
     loadModels(),
+    loadReviewFinalizeDefaults(),
     loadHomeCurrent(),
     loadHomeTicker(),
     loadDeviceStatsAndIds(),
     loadAdminRecent(),
+    loadModelResponseInsights(),
     loadRecentDiag(),
     loadRecentFaults(),
   ])

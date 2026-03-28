@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/08cc3bc1-1666-4a08-bf44-bd4a943505e2/console.sql" value="08cc3bc1-1666-4a08-bf44-bd4a943505e2" />
+    <file url="file://$PROJECT_DIR$/migration_mvp_backend.sql" value="08cc3bc1-1666-4a08-bf44-bd4a943505e2" />
+  </component>
+</project>

@@ -90,6 +90,38 @@ export async function fetchDeviceAnomalies(devNum, hours = 48) {
   const res = await fetch(`${BASE}/api/device/${encodeURIComponent(devNum)}/anomalies?hours=${hours}`)
   return res.json()
 }
+
+export async function compareDeviceModels(payload) {
+  const res = await fetch(`${BASE}/api/device/compare-models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
+export async function fetchModelResponseSummary(source = 'all', hours = 24, devNum = '') {
+  const query = new URLSearchParams({
+    source,
+    hours: String(hours),
+    dev_num: devNum,
+  })
+  const res = await fetch(`${BASE}/api/model-response/summary?${query.toString()}`)
+  return res.json()
+}
+
+export async function fetchModelResponseRecent(limit = 200, source = 'all', hours = 24, devNum = '', modelName = '', anomalyOnly = false) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    source,
+    hours: String(hours),
+    dev_num: devNum,
+    model_name: modelName,
+    anomaly_only: anomalyOnly ? 'true' : 'false',
+  })
+  const res = await fetch(`${BASE}/api/model-response/recent?${query.toString()}`)
+  return res.json()
+}
  
 export async function fetchDiagnosisRecent(limit = 200) {
   const res = await fetch(`${BASE}/api/diagnosis/recent?limit=${limit}`)
@@ -160,6 +192,20 @@ export async function uploadLocalXlsx(file, modelName = 'seal_v4', devNumHint = 
     method: 'POST',
     body: form,
   })
+  return res.json()
+}
+
+export async function finalizeNewDataReviewWorkflow(payload = {}) {
+  const res = await fetch(`${BASE}/api/review/new-data/finalize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
+export async function fetchNewDataReviewConfig() {
+  const res = await fetch(`${BASE}/api/review/new-data/config`)
   return res.json()
 }
  

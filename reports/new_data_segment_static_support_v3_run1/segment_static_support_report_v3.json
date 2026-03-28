@@ -1,0 +1,41 @@
+{
+  "summary": {
+    "segment_support_counts_v3": {
+      "control_challenge_support": 8,
+      "transition_secondary_control": 8,
+      "short_context_only": 7,
+      "static_positive_reference_support": 3,
+      "static_negative_reference_support": 2,
+      "transition_primary_support": 2,
+      "static_review_weak_positive_guarded": 1,
+      "static_watch_breathing_hardguard": 1,
+      "static_watch_confound_hardguard": 1
+    },
+    "run_support_counts_v3": {
+      "control_challenge_support": 7,
+      "transition_secondary_control": 4,
+      "transition_primary_support": 3,
+      "short_context_only": 2,
+      "static_negative_reference_support": 1,
+      "static_review_weak_positive_guarded": 1,
+      "static_watch_breathing_hardguard": 1,
+      "static_watch_confound_hardguard": 1
+    },
+    "review_segment_count_v3": 10,
+    "review_run_count_v3": 10,
+    "old_hard_negative_count_v3": 3,
+    "old_hard_negative_anomaly_false_positive_count_v3": 0,
+    "weak_positive_guarded_runs_v3": 0,
+    "weak_positive_memory_unresolved_runs_v3": 1,
+    "breathing_hardguard_runs_v3": 1,
+    "confound_hardguard_runs_v3": 1
+  },
+  "outputs": {
+    "segment_support_csv": "reports/new_data_segment_static_support_v3_run1/segment_support_output_v3.csv",
+    "run_support_csv": "reports/new_data_segment_static_support_v3_run1/run_support_output_v3.csv",
+    "review_queue_csv": "reports/new_data_segment_static_support_v3_run1/segment_review_queue_v3.csv",
+    "old_hard_eval_csv": "reports/new_data_segment_static_support_v3_run1/old_hard_negative_eval_v3.csv",
+    "report_md": "reports/new_data_segment_static_support_v3_run1/segment_static_support_report_v3.md",
+    "report_json": "reports/new_data_segment_static_support_v3_run1/segment_static_support_report_v3.json"
+  }
+}

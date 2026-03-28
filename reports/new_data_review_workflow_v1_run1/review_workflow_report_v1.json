@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "agenda_rows": 10,
+    "agenda_group_counts": {
+      "05_transition_secondary": 4,
+      "01_transition_primary": 3,
+      "02_guarded_positive": 1,
+      "03_breathing_watch": 1,
+      "04_confound_watch": 1
+    },
+    "prefilled_seed_rows": 5,
+    "pending_rows": 5,
+    "feedback_summary": {
+      "review_rows": 10,
+      "reviewed_rows": 5,
+      "positive_reference_segments": 0,
+      "negative_reference_segments": 0,
+      "transition_positive_segments": 3,
+      "breathing_watch_segments": 1,
+      "confound_segments": 1,
+      "pending_segments": 5,
+      "top_pending_segments": [
+        {
+          "segment_id": "120165524_20260303-181049_unsealed_extHigh_intLow_noHeat_noChange_na::full",
+          "support_status_v3": "static_review_weak_positive_guarded",
+          "memory_role_v2": "hard_negative"
+        },
+        {
+          "segment_id": "120165519_20260309-102255_sealed_extLow_intHigh_noHeat_Change_20260310-1000_unsealed::post_change",
+          "support_status_v3": "transition_secondary_control",
+          "memory_role_v2": NaN
+        },
+        {
+          "segment_id": "120165519_20260313-111811_sealed_extLow_intHigh_Heat_Change_20260315-1500_unsealed::post_change",
+          "support_status_v3": "transition_secondary_control",
+          "memory_role_v2": NaN
+        },
+        {
+          "segment_id": "120165520_20260310-170038_sealed_extEq_intEq_Heat_Change_20260313-1002_unsealed::post_change",
+          "support_status_v3": "transition_secondary_control",
+          "memory_role_v2": NaN
+        },
+        {
+          "segment_id": "120165520_20260318-090358_sealed_extEq_intEq_Heat_Change_20260319-1520_unsealed::post_change",
+          "support_status_v3": "transition_secondary_control",
+          "memory_role_v2": NaN
+        }
+      ]
+    },
+    "template_csv": "reports/new_data_review_workflow_v1_run1/review_template_v2/segment_review_labels_template_v2.csv",
+    "working_csv": "reports/new_data_review_workflow_v1_run1/segment_review_labels_working_v2.csv",
+    "agenda_csv": "reports/new_data_review_workflow_v1_run1/review_agenda_v1.csv"
+  }
+}
