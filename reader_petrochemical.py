@@ -25,7 +25,7 @@ import requests
 #   MQTT_PASSWORD=123456
 #   MQTT_CLIENT_ID=czxy02
 # 默认使用 czxy01
-mqtt_broker = os.getenv("MQTT_BROKER", "127.0.0.1")
+mqtt_broker = os.getenv("MQTT_BROKER", "183.6.64.133")
 mqtt_port = int(os.getenv("MQTT_PORT", "21883"))
 mqtt_username = os.getenv("MQTT_USERNAME", "czxy01")
 mqtt_password = os.getenv("MQTT_PASSWORD", "123456")
